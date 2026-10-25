@@ -42,13 +42,25 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
             int best_score = -1;
             for (int c = 0; c < 3; c++) {
                 int score = 10;
-                switch (game.level_up_cards[c].type) {
-                    case CHOICE_LEARN_MOVE_A:    score = 100; break; // Orbiters give essential 360 defense
-                    case CHOICE_LEARN_ULT_Q:     score = 90;  break; // Special Q panic button
-                    case CHOICE_UPGRADE_BASIC:   score = 80;  break; // More damage/pierce
-                    case CHOICE_LEARN_MOVE_B:    score = 75;  break;
-                    case CHOICE_STAT_HP:         score = 70;  break;
-                    default:                     score = 50;  break;
+                LevelUpCard* card = &game.level_up_cards[c];
+                switch (card->type) {
+                    case CHOICE_EVOLVE_WEAPON:   score = 1000; break; // ALWAYS pick fusion evolutions!
+                    case CHOICE_LEARN_WEAPON:
+                        // Prioritize partner recipe weapon for starter
+                        if ((game.player.starter == STARTER_BULBASAUR && card->weapon_type == WEAPON_PETAL_DANCE) ||
+                            (game.player.starter == STARTER_CHARMANDER && card->weapon_type == WEAPON_FIRE_SPIN) ||
+                            (game.player.starter == STARTER_SQUIRTLE && card->weapon_type == WEAPON_AQUA_ORBS)) {
+                            score = 600;
+                        } else {
+                            score = 250;
+                        }
+                        break;
+                    case CHOICE_UPGRADE_WEAPON:  score = 350;  break; // Boost weapon damage & pierce
+                    case CHOICE_LEARN_ULT_Q:     score = 300;  break; // Active [Q] panic ability
+                    case CHOICE_STAT_HP:         score = 200;  break;
+                    case CHOICE_STAT_DAMAGE:     score = 190;  break;
+                    case CHOICE_STAT_SPEED:      score = 180;  break;
+                    default:                     score = 100;  break;
                 }
                 if (score > best_score) {
                     best_score = score;
@@ -88,7 +100,10 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
         int enemies_in_danger_zone = 0;
         int enemies_in_melee_zone = 0;
 
-        // 1. Swarm Kiting / Repulsion
+        // 1. Swarm Kiting / Repulsion & Positioning
+        float nearest_dx = 0.0f;
+        float nearest_dy = 0.0f;
+
         for (int k = 0; k < game.active_enemy_count; k++) {
             int e_idx = game.active_enemy_indices[k];
             Enemy* e = &game.enemies[e_idx];
@@ -100,18 +115,75 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
 
             if (dist < nearest_enemy_dist && !e->is_underground) {
                 nearest_enemy_dist = dist;
+                nearest_dx = dx;
+                nearest_dy = dy;
             }
 
-            if (dist < 180.0f) {
+            // Repel if dangerously close
+            float repel_thresh = (p->starter == STARTER_BULBASAUR) ? 95.0f : ((p->starter == STARTER_CHARMANDER) ? 105.0f : 130.0f);
+            if (dist < repel_thresh) {
                 enemies_in_danger_zone++;
-                float weight = (180.0f - dist) / 180.0f;
+                float weight = (repel_thresh - dist) / repel_thresh;
                 if (dist > 0.001f) {
-                    steer_x += (dx / dist) * weight * 3.0f;
-                    steer_y += (dy / dist) * weight * 3.0f;
+                    steer_x += (dx / dist) * weight * 3.5f;
+                    steer_y += (dy / dist) * weight * 3.5f;
                 }
             }
-            if (dist < 60.0f) {
+            if (dist < 70.0f) {
                 enemies_in_melee_zone++;
+            }
+        }
+
+        if (nearest_enemy_dist < 600.0f) {
+            p->aim_dir = (Vec2){ -nearest_dx / nearest_enemy_dist, -nearest_dy / nearest_enemy_dist };
+        }
+
+        // Tactical Stance & Kiting Orbit:
+        // Bulbasaur & Charmander need to stay within attack range (~95-145px) and face/circle foes!
+        if (nearest_enemy_dist < 400.0f && enemies_in_melee_zone == 0) {
+            float to_foe_x = -nearest_dx / nearest_enemy_dist;
+            float to_foe_y = -nearest_dy / nearest_enemy_dist;
+            // Tangential orbit vector for circular strafing
+            float tan_x = -to_foe_y;
+            float tan_y =  to_foe_x;
+
+            if (p->starter == STARTER_CHARMANDER) {
+                // Directional Flamethrower: circle enemies while facing them at ~110-150px sweet spot
+                if (nearest_enemy_dist > 150.0f) {
+                    steer_x += to_foe_x * 2.0f;
+                    steer_y += to_foe_y * 2.0f;
+                } else if (nearest_enemy_dist < 100.0f) {
+                    steer_x -= to_foe_x * 2.8f;
+                    steer_y -= to_foe_y * 2.8f;
+                } else {
+                    // Strafe tangentially in orbit and burn them with the flame cone
+                    steer_x += tan_x * 2.2f;
+                    steer_y += tan_y * 2.2f;
+                }
+            } else if (p->starter == STARTER_BULBASAUR) {
+                // Vine Whip sweet spot: maintain 90-125px reach
+                if (nearest_enemy_dist > 125.0f) {
+                    steer_x += to_foe_x * 1.8f;
+                    steer_y += to_foe_y * 1.8f;
+                } else if (nearest_enemy_dist < 75.0f) {
+                    steer_x -= to_foe_x * 2.2f;
+                    steer_y -= to_foe_y * 2.2f;
+                } else {
+                    steer_x += tan_x * 1.5f;
+                    steer_y += tan_y * 1.5f;
+                }
+            } else if (p->starter == STARTER_SQUIRTLE) {
+                // Squirtle: ranged bubbles, keep comfortable 120-165px distance
+                if (nearest_enemy_dist > 165.0f) {
+                    steer_x += to_foe_x * 1.6f;
+                    steer_y += to_foe_y * 1.6f;
+                } else if (nearest_enemy_dist < 90.0f) {
+                    steer_x -= to_foe_x * 2.0f;
+                    steer_y -= to_foe_y * 2.0f;
+                } else {
+                    steer_x += tan_x * 1.4f;
+                    steer_y += tan_y * 1.4f;
+                }
             }
         }
 
@@ -171,7 +243,7 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
         if (steer_x > 0.3f)  keys[SDL_SCANCODE_D] = 1;
 
         // 5. Active Ability: DASH (SHIFT)
-        if (nearest_enemy_dist < 50.0f || enemies_in_melee_zone >= 2) {
+        if (nearest_enemy_dist < 85.0f || enemies_in_melee_zone >= 1) {
             if (p->dash_unlocked && p->dash_cooldown_timer <= 0.0f && p->state == PLAYER_STATE_NORMAL) {
                 keys[SDL_SCANCODE_LSHIFT] = 1;
                 res.dashes_used++;

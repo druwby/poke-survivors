@@ -132,6 +132,47 @@ typedef struct {
     float attack_radius;
 } PokedexEntry;
 
+#define MAX_ACTIVE_WEAPONS 4
+
+typedef enum {
+    WEAPON_NONE = 0,
+    // Base Weapons
+    WEAPON_VINE_WHIP,       // Spline wavy whips targeting close foes
+    WEAPON_FLAMETHROWER,    // Directional channeled flame cone + scorch
+    WEAPON_BUBBLE_BEAM,     // Buoyant bubbles trapping & popping enemies
+    WEAPON_PETAL_DANCE,     // Orbiting flower blossoms expanding, spinning, dissipating
+    WEAPON_FIRE_SPIN,       // Whirling fireballs orbiting closely with high burn DPS
+    WEAPON_AQUA_ORBS,       // Fast rotating water spheres with massive knockback
+    WEAPON_RAZOR_LEAF,      // Sharp spinning leaves launched at nearby enemies
+    WEAPON_SWIFT,           // Seeking golden psychic stars that home in on foes
+    WEAPON_THUNDER_SHOCK,   // Periodic vertical lightning bolt strikes from the sky
+    WEAPON_TOXIC_SPORE,     // Expanding poison spore ring leaving slowing toxic pools
+    
+    // Evolved / Combined Weapons (Fusions)
+    WEAPON_SOLAR_FRENZY,    // Vine Whip + Petal Dance: 4-way solar spline whips + perpetual petal storm
+    WEAPON_FIRE_BLAST,      // Flamethrower + Fire Spin: Molten channeled torrent + explosive kanji starbursts & lava
+    WEAPON_HYDRO_VORTEX,    // Bubble Beam + Aqua Orbs: Iridescent bubble maelstrom suctioning and detonating crowds
+    WEAPON_PLASMA_TEMPEST,  // Swift + Thunder Shock: Homing golden stars triggering chain lightning arcs
+    WEAPON_VENOM_CATACLYSM, // Razor Leaf + Toxic Spore: Corrosive acid leaves melting armor and leaving toxic mires
+
+    WEAPON_TYPE_COUNT
+} WeaponType;
+
+typedef struct {
+    WeaponType type;
+    int level;               // 1 to 5 (or 1 for evolved)
+    float cooldown;
+    float cooldown_timer;
+    float damage;
+    float proj_speed;
+    float proj_radius;
+    int count;               // e.g. number of projectiles / whips / orbs
+    int pierce;
+    float knockback;
+    float range;
+    float state_timer;       // for custom cycle timers (e.g. Petal Dance bloom, Fire Blast star burst)
+} ActiveWeaponSlot;
+
 typedef struct {
     StarterID starter;
     Vec2 pos;
@@ -183,6 +224,11 @@ typedef struct {
     int move_b_level;     // Petal Dance / Dragon Breath / Aqua Cleave
     int move_c_level;     // Toxic Spore / Flame Burst / Bubble Beam
     
+    // Active Weapons Inventory (Roguelike System)
+    ActiveWeaponSlot weapons[MAX_ACTIVE_WEAPONS];
+    int weapon_count;
+    Vec2 aim_dir;
+
     SpriteSheet sprite;          // default walk sprite
     SpriteSheet sprite_charge;   // Charge-Anim.png for Dash
     SpriteSheet sprite_special;  // Withdraw / Attack for Special Q
@@ -278,12 +324,17 @@ typedef enum {
     PROJ_ENEMY_BULLET  = 8,
     PROJ_BUBBLE        = 9,  // Squirtle: buoyant floating bubble that pops on impact
     PROJ_MORTAR_SHELL  = 10, // Enemy/Player arcing artillery shell
+    PROJ_SWIFT_STAR    = 11, // Homing golden star
+    PROJ_LIGHTNING_BOLT= 12, // Vertical crackling lightning strike
+    PROJ_FIRE_BLAST    = 13, // Giant kanji "大" starburst
 } ProjectileType;
 
 typedef enum {
     HAZARD_FIRE_SCORCH   = 0, // Charmander: fiery burning patch on the ground
     HAZARD_TOXIC_SPORE   = 1, // Bulbasaur: slowing poison pollen puddle
     HAZARD_MORTAR_TARGET = 2, // Enemy mortar telegraph shadow / danger zone
+    HAZARD_ACID_MIRE     = 3, // Corrosive toxic mire pool (Venom Cataclysm)
+    HAZARD_LAVA_POOL     = 4, // Molten lava zone (Fire Blast)
 } HazardType;
 
 typedef struct {
@@ -452,10 +503,16 @@ typedef enum {
     CHOICE_STAT_HP,
     CHOICE_STAT_SPEED,
     CHOICE_STAT_DAMAGE,
+    CHOICE_LEARN_WEAPON,
+    CHOICE_UPGRADE_WEAPON,
+    CHOICE_EVOLVE_WEAPON,
 } ChoiceType;
 
 typedef struct {
     ChoiceType type;
+    WeaponType weapon_type;
+    int slot_index;
+    int slot_ingredient_b;
     char title[32];
     char desc[96];
     char tag[16];
@@ -487,6 +544,8 @@ typedef struct {
     char route_banner_text[64];
     
     Vec2 camera;
+    Vec2 mouse_pos;
+    bool mouse_active;
     
     Player player;
     EnemyTypeConfig enemy_types[MAX_ENEMY_TYPES];

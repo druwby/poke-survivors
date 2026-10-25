@@ -133,7 +133,7 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
         strncpy(cfg->name, entry->name, sizeof(cfg->name) - 1);
         cfg->name[sizeof(cfg->name) - 1] = '\0';
         cfg->max_hp = entry->base_hp;
-        cfg->speed = entry->base_speed;
+        cfg->speed = entry->base_speed * 0.48f; // Paced movement speed (readable kiting)
         cfg->touch_damage = entry->touch_damage;
         cfg->radius = entry->radius;
         cfg->xp_value = entry->xp_value;
@@ -190,22 +190,23 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
             boss_cfg->pokedex_id = bpid;
             strncpy(boss_cfg->name, route->boss_name ? route->boss_name : b_entry->name, sizeof(boss_cfg->name) - 1);
             boss_cfg->name[sizeof(boss_cfg->name) - 1] = '\0';
-            boss_cfg->max_hp = b_entry->base_hp * 6.5f;
-            boss_cfg->speed = b_entry->base_speed * 0.95f;
+            float boss_hp_mult = 22.0f + (float)section_idx * 5.0f;
+            boss_cfg->max_hp = b_entry->base_hp * boss_hp_mult;
+            boss_cfg->speed = b_entry->base_speed * 0.40f;
             boss_cfg->touch_damage = b_entry->touch_damage * 1.5f;
             boss_cfg->radius = b_entry->radius * 1.35f;
-            boss_cfg->xp_value = 80;
-            boss_cfg->knockback_resist = 0.95f;
+            boss_cfg->xp_value = 120;
+            boss_cfg->knockback_resist = 0.96f; // Immovable titan
             boss_cfg->spawn_weight = 0.0f; // Boss is spawned specifically
             boss_cfg->sprite_scale = b_entry->scale * 1.35f;
             boss_cfg->debug_color = (SDL_Color){ 230, 40, 40, 255 };
             boss_cfg->sprite = Pokedex_LoadSprite(game->renderer, bpid, boss_cfg->sprite_scale);
             boss_cfg->attack_type = b_entry->attack_type;
             boss_cfg->attack_range = b_entry->attack_range * 1.25f;
-            boss_cfg->attack_cooldown = b_entry->attack_cooldown * 0.85f;
+            boss_cfg->attack_cooldown = b_entry->attack_cooldown * 0.90f;
             boss_cfg->attack_windup = b_entry->attack_windup;
             boss_cfg->attack_duration = 0.40f;
-            boss_cfg->attack_damage = b_entry->attack_damage * 1.6f;
+            boss_cfg->attack_damage = b_entry->attack_damage * 1.4f;
             boss_cfg->attack_radius = b_entry->attack_radius * 1.3f;
             boss_cfg->is_boss = true;
             boss_cfg->move_pattern = ENEMY_MOVE_SWARM;
@@ -224,31 +225,29 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
 
     game->active_enemy_type_count = type_slot;
 
-    // Dynamic difficulty curve based on section and route index
+    // Dynamic difficulty curve based on section and route index (Tuned for clean horde pacing)
     if (section_idx == 0 && route_idx == 0) {
-        game->spawner.spawn_interval = 0.85f;
+        game->spawner.spawn_interval = 1.6f;
         game->spawner.batch_size = 1;
-        game->spawner.max_enemies = 30;
+        game->spawner.max_enemies = 18;
     } else if (section_idx == 0 && route_idx == 1) {
-        game->spawner.spawn_interval = 0.70f;
-        game->spawner.batch_size = 2;
-        game->spawner.max_enemies = 50;
+        game->spawner.spawn_interval = 1.35f;
+        game->spawner.batch_size = 1;
+        game->spawner.max_enemies = 26;
     } else if (section_idx == 0 && route_idx == 2) {
-        game->spawner.spawn_interval = 0.65f;
+        game->spawner.spawn_interval = 1.20f;
         game->spawner.batch_size = 2;
-        game->spawner.max_enemies = 60;
+        game->spawner.max_enemies = 34;
     } else if (route->is_gym) {
-        float sec_factor = 1.0f - (float)section_idx * 0.08f;
-        if (sec_factor < 0.45f) sec_factor = 0.45f;
-        game->spawner.spawn_interval = 0.60f * sec_factor;
-        game->spawner.batch_size = 2 + (section_idx >= 3 ? 1 : 0);
-        game->spawner.max_enemies = 70 + section_idx * 20;
+        game->spawner.spawn_interval = 2.0f;
+        game->spawner.batch_size = 1;
+        game->spawner.max_enemies = 18;
     } else {
-        float sec_factor = 1.0f - (float)section_idx * 0.05f;
-        if (sec_factor < 0.35f) sec_factor = 0.35f;
-        game->spawner.spawn_interval = 0.45f * sec_factor;
-        game->spawner.batch_size = 3 + section_idx / 2;
-        game->spawner.max_enemies = 200 + section_idx * 100;
+        float sec_factor = 1.0f - (float)section_idx * 0.04f;
+        if (sec_factor < 0.65f) sec_factor = 0.65f;
+        game->spawner.spawn_interval = 1.15f * sec_factor;
+        game->spawner.batch_size = 2;
+        game->spawner.max_enemies = 35 + section_idx * 6; // Caps at 35-75 enemies
     }
 }
 
@@ -311,8 +310,9 @@ void KantoRoutes_Update(GameState* game, float dt) {
                         b->ai_state = ENEMY_AI_CHASE;
                         Game_ActivateEnemy(game, e);
                         game->gym_boss_spawned = true;
-                        game->spawner.spawn_interval = 1.30f;
+                        game->spawner.spawn_interval = 3.2f; // Rare minion reinforcements during boss fight
                         game->spawner.batch_size = 1;
+                        game->spawner.max_enemies = 8;
                         snprintf(game->route_banner_text, sizeof(game->route_banner_text), "GYM LEADER BATTLE!");
                         game->route_banner_timer = 3.5f;
                         break;

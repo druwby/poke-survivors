@@ -159,94 +159,149 @@ void Game_GenerateLevelUpCards(GameState* game) {
     Player* p = &game->player;
     StarterID s = p->starter;
 
-    // Card 0: Starting Move Mastery
-    game->level_up_cards[0].type = CHOICE_UPGRADE_BASIC;
-    if (s == STARTER_BULBASAUR) {
-        strncpy(game->level_up_cards[0].title, "Vine Whip Mastery", 31);
-        strncpy(game->level_up_cards[0].desc, "+35% Whip Damage, +25px reach, faster whip crack.", 95);
-        strncpy(game->level_up_cards[0].tag, "UPGRADE", 15);
-        game->level_up_cards[0].color = (SDL_Color){ 80, 220, 80, 255 };
-    } else if (s == STARTER_CHARMANDER) {
-        strncpy(game->level_up_cards[0].title, "Flamethrower Mastery", 31);
-        strncpy(game->level_up_cards[0].desc, "+35% Flamethrower Damage, +1 Pierce, wider flame cone.", 95);
-        strncpy(game->level_up_cards[0].tag, "UPGRADE", 15);
-        game->level_up_cards[0].color = (SDL_Color){ 250, 110, 30, 255 };
-    } else {
-        strncpy(game->level_up_cards[0].title, "Bubble Beam Mastery", 31);
-        strncpy(game->level_up_cards[0].desc, "+35% Bubble Damage, +1 Bubble Count, larger trapping bubbles.", 95);
-        strncpy(game->level_up_cards[0].tag, "UPGRADE", 15);
-        game->level_up_cards[0].color = (SDL_Color){ 60, 180, 255, 255 };
+    // Collect all valid card candidates
+    LevelUpCard candidates[32];
+    int cand_count = 0;
+
+    // 1. Check for Evolution Fusions (Requires both ingredient weapons in inventory at Lv 3+)
+    for (int r = 0; r < g_evolution_recipe_count && cand_count < 32; r++) {
+        const EvolutionRecipe* recipe = &g_evolution_recipes[r];
+        int slot_a = -1;
+        int slot_b = -1;
+        for (int i = 0; i < p->weapon_count; i++) {
+            if (p->weapons[i].type == recipe->ingredient_a && p->weapons[i].level >= 3) slot_a = i;
+            if (p->weapons[i].type == recipe->ingredient_b && p->weapons[i].level >= 3) slot_b = i;
+        }
+        if (slot_a != -1 && slot_b != -1 && slot_a != slot_b) {
+            LevelUpCard* c = &candidates[cand_count++];
+            c->type = CHOICE_EVOLVE_WEAPON;
+            c->weapon_type = recipe->result;
+            c->slot_index = slot_a;
+            c->slot_ingredient_b = slot_b;
+            strncpy(c->title, recipe->name, 31);
+            strncpy(c->desc, recipe->desc, 95);
+            strncpy(c->tag, "FUSION", 15);
+            c->color = Weapons_GetColor(recipe->result);
+        }
     }
 
-    // Card 1: Secondary Move (Orbiters or Cleave)
-    if (!game->weapons.orbiters.enabled) {
-        game->level_up_cards[1].type = CHOICE_LEARN_MOVE_A;
-        if (s == STARTER_BULBASAUR) {
-            strncpy(game->level_up_cards[1].title, "Petal Dance Bloom", 31);
-            strncpy(game->level_up_cards[1].desc, "Blooming flower petals that spin, shred enemies, and restore HP on hit!", 95);
-            strncpy(game->level_up_cards[1].tag, "NEW MOVE", 15);
-            game->level_up_cards[1].color = (SDL_Color){ 240, 110, 190, 255 };
-        } else if (s == STARTER_CHARMANDER) {
-            strncpy(game->level_up_cards[1].title, "Fire Spin Orbs", 31);
-            strncpy(game->level_up_cards[1].desc, "Whirling fireballs encircling you, continuously burning enemies!", 95);
-            strncpy(game->level_up_cards[1].tag, "NEW MOVE", 15);
-            game->level_up_cards[1].color = (SDL_Color){ 255, 90, 20, 255 };
-        } else {
-            strncpy(game->level_up_cards[1].title, "Aqua Orbiters", 31);
-            strncpy(game->level_up_cards[1].desc, "Rotating protective water orbs shielding you from swarming hordes!", 95);
-            strncpy(game->level_up_cards[1].tag, "NEW MOVE", 15);
-            game->level_up_cards[1].color = (SDL_Color){ 70, 160, 255, 255 };
-        }
-    } else if (!game->weapons.cleave.enabled && s != STARTER_BULBASAUR) {
-        game->level_up_cards[1].type = CHOICE_LEARN_MOVE_B;
-        if (s == STARTER_CHARMANDER) {
-            strncpy(game->level_up_cards[1].title, "Dragon Breath", 31);
-            strncpy(game->level_up_cards[1].desc, "Wide flaming cone sweep devastating enemies in facing direction!", 95);
-        } else {
-            strncpy(game->level_up_cards[1].title, "Aqua Jet Cleave", 31);
-            strncpy(game->level_up_cards[1].desc, "High pressure water crescent slicing through enemy crowds!", 95);
-        }
-        strncpy(game->level_up_cards[1].tag, "NEW MOVE", 15);
-        game->level_up_cards[1].color = (SDL_Color){ 80, 200, 240, 255 };
-    } else {
-        game->level_up_cards[1].type = CHOICE_LEARN_MOVE_C;
-        if (s == STARTER_BULBASAUR) {
-            strncpy(game->level_up_cards[1].title, "Toxic Spore Ring", 31);
-            strncpy(game->level_up_cards[1].desc, "Expanding poison pulse that poisons and slows all surrounding foes!", 95);
-        } else if (s == STARTER_CHARMANDER) {
-            strncpy(game->level_up_cards[1].title, "Flame Burst Ring", 31);
-            strncpy(game->level_up_cards[1].desc, "Explosive radial fire blast detonating outwards!", 95);
-        } else {
-            strncpy(game->level_up_cards[1].title, "Bubble Beam Ring", 31);
-            strncpy(game->level_up_cards[1].desc, "Expanding ring of high velocity pressurized popping bubbles!", 95);
-        }
-        strncpy(game->level_up_cards[1].tag, "NEW MOVE", 15);
-        game->level_up_cards[1].color = (SDL_Color){ 200, 100, 240, 255 };
+    // 2. Upgrades for currently equipped weapons (if < Lv 5 and not already evolved)
+    for (int i = 0; i < p->weapon_count && cand_count < 32; i++) {
+        ActiveWeaponSlot* w = &p->weapons[i];
+        if (w->type == WEAPON_NONE || Weapons_IsEvolved(w->type) || w->level >= 5) continue;
+        
+        LevelUpCard* c = &candidates[cand_count++];
+        c->type = CHOICE_UPGRADE_WEAPON;
+        c->weapon_type = w->type;
+        c->slot_index = i;
+        c->slot_ingredient_b = -1;
+        snprintf(c->title, 31, "%s Lv %d", Weapons_GetName(w->type), w->level + 1);
+        snprintf(c->desc, 95, "+25%% Damage, enhanced velocity, reach, and reduced cooldown!");
+        strncpy(c->tag, "UPGRADE", 15);
+        c->color = Weapons_GetColor(w->type);
     }
 
-    // Card 2: Active Ability Q Unlock or Ultimate Stat Mastery
-    if (!p->special_q_unlocked) {
-        game->level_up_cards[2].type = CHOICE_LEARN_ULT_Q;
-        if (s == STARTER_BULBASAUR) {
-            strncpy(game->level_up_cards[2].title, "Solar Beam [Q]", 31);
-            strncpy(game->level_up_cards[2].desc, "UNLOCK ACTIVE [Q]: Devastating continuous solar ray vaporizing hordes!", 95);
-            game->level_up_cards[2].color = (SDL_Color){ 245, 225, 60, 255 };
-        } else if (s == STARTER_CHARMANDER) {
-            strncpy(game->level_up_cards[2].title, "Fire Blast [Q]", 31);
-            strncpy(game->level_up_cards[2].desc, "UNLOCK ACTIVE [Q]: Iconic 5-pointed starburst blast repelling foes with fire!", 95);
-            game->level_up_cards[2].color = (SDL_Color){ 255, 60, 30, 255 };
-        } else {
-            strncpy(game->level_up_cards[2].title, "Hydro Pump [Q]", 31);
-            strncpy(game->level_up_cards[2].desc, "UNLOCK ACTIVE [Q]: 4-jet spinning shell panic button repelling swarms!", 95);
-            game->level_up_cards[2].color = (SDL_Color){ 50, 220, 255, 255 };
+    // 3. New Weapons from pool (if player has open weapon slots < MAX_ACTIVE_WEAPONS)
+    if (p->weapon_count < MAX_ACTIVE_WEAPONS) {
+        for (int t = WEAPON_VINE_WHIP; t <= WEAPON_TOXIC_SPORE && cand_count < 32; t++) {
+            WeaponType wtype = (WeaponType)t;
+            bool already_owned = false;
+            for (int i = 0; i < p->weapon_count; i++) {
+                if (p->weapons[i].type == wtype) { already_owned = true; break; }
+            }
+            if (already_owned) continue;
+
+            LevelUpCard* c = &candidates[cand_count++];
+            c->type = CHOICE_LEARN_WEAPON;
+            c->weapon_type = wtype;
+            c->slot_index = -1;
+            c->slot_ingredient_b = -1;
+            snprintf(c->title, 31, "%s", Weapons_GetName(wtype));
+            strncpy(c->desc, Weapons_GetDescription(wtype), 95);
+            strncpy(c->tag, "NEW WEAPON", 15);
+            c->color = Weapons_GetColor(wtype);
         }
-        strncpy(game->level_up_cards[2].tag, "ACTIVE [Q]", 15);
-    } else {
-        game->level_up_cards[2].type = CHOICE_STAT_HP;
-        strncpy(game->level_up_cards[2].title, "Primal Vitality", 31);
-        strncpy(game->level_up_cards[2].desc, "+40 Max HP, +1.5 HP/s Regen, Full HP Heal, +15% Move Speed!", 95);
-        strncpy(game->level_up_cards[2].tag, "STAT BOOST", 15);
-        game->level_up_cards[2].color = (SDL_Color){ 255, 215, 70, 255 };
+    }
+
+    // 4. Special [Q] Unlock (if locked)
+    if (!p->special_q_unlocked && cand_count < 32) {
+        LevelUpCard* c = &candidates[cand_count++];
+        c->type = CHOICE_LEARN_ULT_Q;
+        c->weapon_type = WEAPON_NONE;
+        c->slot_index = -1;
+        c->slot_ingredient_b = -1;
+        if (s == STARTER_BULBASAUR) {
+            strncpy(c->title, "Solar Beam [Q]", 31);
+            strncpy(c->desc, "UNLOCK ACTIVE [Q]: Devastating continuous solar ray vaporizing hordes!", 95);
+            c->color = (SDL_Color){ 245, 225, 60, 255 };
+        } else if (s == STARTER_CHARMANDER) {
+            strncpy(c->title, "Fire Blast [Q]", 31);
+            strncpy(c->desc, "UNLOCK ACTIVE [Q]: Iconic 5-pointed starburst blast repelling foes with fire!", 95);
+            c->color = (SDL_Color){ 255, 60, 30, 255 };
+        } else {
+            strncpy(c->title, "Hydro Pump [Q]", 31);
+            strncpy(c->desc, "UNLOCK ACTIVE [Q]: 4-jet spinning shell panic button repelling swarms!", 95);
+            c->color = (SDL_Color){ 50, 220, 255, 255 };
+        }
+        strncpy(c->tag, "ACTIVE [Q]", 15);
+    }
+
+    // 5. Stat Boosts (Passives)
+    if (cand_count < 32) {
+        LevelUpCard* c = &candidates[cand_count++];
+        c->type = CHOICE_STAT_HP;
+        c->weapon_type = WEAPON_NONE;
+        strncpy(c->title, "Primal Vitality", 31);
+        strncpy(c->desc, "+25 Max HP, +0.8 HP/s Passive Regen, Full Heal, +10 Move Speed!", 95);
+        strncpy(c->tag, "STAT BOOST", 15);
+        c->color = (SDL_Color){ 255, 215, 70, 255 };
+    }
+    if (cand_count < 32) {
+        LevelUpCard* c = &candidates[cand_count++];
+        c->type = CHOICE_STAT_DAMAGE;
+        c->weapon_type = WEAPON_NONE;
+        strncpy(c->title, "Power Band", 31);
+        strncpy(c->desc, "+20% Global Attack Damage across all equipped moves!", 95);
+        strncpy(c->tag, "STAT BOOST", 15);
+        c->color = (SDL_Color){ 255, 100, 50, 255 };
+    }
+    if (cand_count < 32) {
+        LevelUpCard* c = &candidates[cand_count++];
+        c->type = CHOICE_STAT_SPEED;
+        c->weapon_type = WEAPON_NONE;
+        strncpy(c->title, "Quick Claw", 31);
+        strncpy(c->desc, "+15 Move Speed, +25 Pickup Radius, -12% Dash Cooldown!", 95);
+        strncpy(c->tag, "STAT BOOST", 15);
+        c->color = (SDL_Color){ 100, 230, 255, 255 };
+    }
+
+    // Pick 3 distinct choices:
+    // If there is an evolution candidate, guarantee it in slot 0!
+    int selected = 0;
+    bool used[32];
+    memset(used, 0, sizeof(used));
+
+    for (int i = 0; i < cand_count; i++) {
+        if (candidates[i].type == CHOICE_EVOLVE_WEAPON) {
+            game->level_up_cards[selected++] = candidates[i];
+            used[i] = true;
+            break;
+        }
+    }
+
+    // Fill remaining cards with random candidates
+    while (selected < 3 && cand_count > 0) {
+        int r_idx = rand() % cand_count;
+        if (!used[r_idx]) {
+            used[r_idx] = true;
+            game->level_up_cards[selected++] = candidates[r_idx];
+        } else {
+            bool any_left = false;
+            for (int k = 0; k < cand_count; k++) {
+                if (!used[k]) { any_left = true; break; }
+            }
+            if (!any_left) break;
+        }
     }
 }
 
@@ -256,70 +311,72 @@ void Game_ApplyLevelUpChoice(GameState* game, int card_index) {
     LevelUpCard* card = &game->level_up_cards[card_index];
 
     switch (card->type) {
+        case CHOICE_EVOLVE_WEAPON:
+            Weapons_EvolveWeapon(game, card->slot_index, card->slot_ingredient_b, card->weapon_type);
+            snprintf(game->route_banner_text, sizeof(game->route_banner_text), "FUSED! LEARNED %s!", Weapons_GetName(card->weapon_type));
+            game->route_banner_timer = 3.5f;
+            break;
+
+        case CHOICE_UPGRADE_WEAPON:
+            Weapons_UpgradeWeapon(game, card->slot_index);
+            snprintf(game->route_banner_text, sizeof(game->route_banner_text), "UPGRADED: %s!", card->title);
+            game->route_banner_timer = 2.5f;
+            break;
+
+        case CHOICE_LEARN_WEAPON:
+            Weapons_AddWeapon(game, card->weapon_type);
+            snprintf(game->route_banner_text, sizeof(game->route_banner_text), "NEW WEAPON: %s!", Weapons_GetName(card->weapon_type));
+            game->route_banner_timer = 2.5f;
+            break;
+
         case CHOICE_UPGRADE_BASIC:
             p->move_basic_level++;
-            if (p->starter == STARTER_BULBASAUR) {
-                game->weapons.cleave.damage *= 1.35f;
-                game->weapons.cleave.slash_range += 25.0f;
-            } else if (p->starter == STARTER_CHARMANDER) {
-                game->weapons.water_wand.damage *= 1.35f;
-                game->weapons.water_wand.pierce += 1;
-                game->weapons.water_wand.proj_speed += 40.0f;
-            } else {
-                game->weapons.water_wand.damage *= 1.35f;
-                game->weapons.water_wand.proj_radius += 2.0f;
-                game->weapons.water_wand.cooldown *= 0.90f;
-            }
+            if (p->weapon_count > 0) Weapons_UpgradeWeapon(game, 0);
             break;
 
         case CHOICE_LEARN_MOVE_A:
-            game->weapons.orbiters.enabled = true;
-            game->weapons.orbiters.orbiter_count = 3;
-            game->weapons.orbiters.damage = 25.0f * p->damage_mult;
-            p->move_a_level = 1;
+            Weapons_AddWeapon(game, (p->starter == STARTER_BULBASAUR) ? WEAPON_PETAL_DANCE : ((p->starter == STARTER_CHARMANDER) ? WEAPON_FIRE_SPIN : WEAPON_AQUA_ORBS));
             break;
 
         case CHOICE_LEARN_MOVE_B:
-            game->weapons.cleave.enabled = true;
-            game->weapons.cleave.damage = 50.0f * p->damage_mult;
-            p->move_b_level = 1;
+            Weapons_AddWeapon(game, (p->starter == STARTER_CHARMANDER) ? WEAPON_FLAMETHROWER : WEAPON_BUBBLE_BEAM);
             break;
 
         case CHOICE_LEARN_MOVE_C:
-            game->weapons.pulse.enabled = true;
-            game->weapons.pulse.damage = 45.0f * p->damage_mult;
-            p->move_c_level = 1;
+            Weapons_AddWeapon(game, WEAPON_TOXIC_SPORE);
             break;
 
         case CHOICE_LEARN_ULT_Q:
             p->special_q_unlocked = true;
-            p->special_q_cooldown = 4.0f;
+            p->special_q_cooldown = 7.0f;
             p->special_q_cooldown_timer = 0.0f;
             p->special_q_duration = 1.6f;
-            p->special_q_damage = 95.0f;
+            p->special_q_damage = 45.0f;
             p->special_q_range = 145.0f;
-            p->special_q_knockback = 750.0f;
-            p->special_q_spin_speed = 16.0f;
+            p->special_q_knockback = 520.0f;
+            p->special_q_spin_speed = 14.0f;
+            snprintf(game->route_banner_text, sizeof(game->route_banner_text), "UNLOCKED ACTIVE [Q] ABILITY!");
+            game->route_banner_timer = 3.0f;
             break;
 
         case CHOICE_STAT_HP:
-            p->max_hp += 40.0f;
+            p->max_hp += 25.0f;
             p->hp = p->max_hp;
-            p->hp_regen += 1.5f;
-            p->speed += 25.0f;
+            p->hp_regen += 0.8f;
+            p->speed += 10.0f;
             break;
 
         case CHOICE_STAT_SPEED:
-            p->speed += 35.0f;
-            p->pickup_radius += 35.0f;
+            p->speed += 15.0f;
+            p->pickup_radius += 25.0f;
+            p->dash_cooldown *= 0.88f;
             break;
 
         case CHOICE_STAT_DAMAGE:
-            p->damage_mult += 0.25f;
+            p->damage_mult += 0.20f;
             break;
     }
 
-    // Resume gameplay seamlessly!
     game->app_state = APP_STATE_PLAYING;
     game->paused = false;
 }
@@ -344,51 +401,51 @@ void Game_SelectStarter(GameState* game, StarterID starter) {
     p->anim.anim_timer = 0.0f;
     p->anim.is_moving = false;
 
-    // Dash Ability is available by default
+    // Dash Ability is available by default (tactical dodge roll)
     p->dash_unlocked = true;
-    p->dash_cooldown = 0.8f;
+    p->dash_cooldown = 1.0f;
     p->dash_cooldown_timer = 0.0f;
-    p->dash_duration = 0.20f;
+    p->dash_duration = 0.22f;
     p->dash_timer = 0.0f;
-    p->dash_speed = 600.0f;
+    p->dash_speed = 380.0f;
     p->dash_dir = (Vec2){ 0.0f, 1.0f };
 
     // Active Q Ability starts locked (learned upon progression!)
     p->special_q_unlocked = false;
-    p->special_q_cooldown = 4.0f;
+    p->special_q_cooldown = 7.0f;
     p->special_q_cooldown_timer = 0.0f;
     p->special_q_duration = 1.6f;
-    p->special_q_damage = 95.0f;
+    p->special_q_damage = 45.0f;
     p->special_q_range = 145.0f;
-    p->special_q_knockback = 750.0f;
-    p->special_q_spin_speed = 16.0f;
+    p->special_q_knockback = 520.0f;
+    p->special_q_spin_speed = 14.0f;
 
-    // Load Starter-Specific Sprites & Base Attributes
+    // Load Starter-Specific Sprites & Base Attributes (Tuned for deliberate, readable movement)
     if (starter == STARTER_BULBASAUR) {
-        p->speed = 185.0f;
+        p->speed = 135.0f;
         p->max_hp = 125.0f;
         p->hp = 125.0f;
-        p->hp_regen = 1.5f;
+        p->hp_regen = 1.2f;
         p->radius = 16.0f;
-        p->pickup_radius = 125.0f;
+        p->pickup_radius = 120.0f;
         p->sprite = Pokedex_LoadSprite(game->renderer, 1, 1.8f);
         p->sprite_charge = Sprite_Load(game->renderer, "assets/sprites/sprite/0001/Charge-Anim.png", 32, 32, 10, 8, 0.035f, 1.8f);
         p->sprite_special = Sprite_Load(game->renderer, "assets/sprites/sprite/0001/Attack-Anim.png", 64, 72, 11, 8, 0.045f, 1.8f);
     } else if (starter == STARTER_CHARMANDER) {
-        p->speed = 210.0f;
+        p->speed = 145.0f;
         p->max_hp = 115.0f;
         p->hp = 115.0f;
-        p->hp_regen = 1.0f;
+        p->hp_regen = 0.8f;
         p->radius = 15.0f;
         p->pickup_radius = 120.0f;
         p->sprite = Pokedex_LoadSprite(game->renderer, 4, 1.8f);
         p->sprite_charge = Sprite_Load(game->renderer, "assets/sprites/sprite/0004/Charge-Anim.png", 32, 32, 10, 8, 0.035f, 1.8f);
         p->sprite_special = Sprite_Load(game->renderer, "assets/sprites/sprite/0004/Attack-Anim.png", 64, 64, 11, 8, 0.045f, 1.8f);
     } else { // STARTER_SQUIRTLE
-        p->speed = 195.0f;
+        p->speed = 138.0f;
         p->max_hp = 130.0f;
         p->hp = 130.0f;
-        p->hp_regen = 1.4f;
+        p->hp_regen = 1.0f;
         p->radius = 16.0f;
         p->pickup_radius = 120.0f;
         p->sprite = Pokedex_LoadSprite(game->renderer, 7, 1.8f);
@@ -470,10 +527,10 @@ void Game_Init(GameState* game, SDL_Window* window, SDL_Renderer* renderer) {
     // Initialize Weapons & Spawner
     Weapons_Init(&game->weapons);
 
-    game->spawner.spawn_interval = 0.35f;
+    game->spawner.spawn_interval = 1.4f;
     game->spawner.spawn_timer = 0.0f;
-    game->spawner.max_enemies = 1500;
-    game->spawner.batch_size = 4;
+    game->spawner.max_enemies = 35;
+    game->spawner.batch_size = 1;
     game->spawner.game_time = 0.0f;
     game->spawner.difficulty_mult = 1.0f;
     game->spawner.separation_enabled = true;
@@ -486,11 +543,20 @@ void Game_Init(GameState* game, SDL_Window* window, SDL_Renderer* renderer) {
     DevMenu_Init(&game->dev_menu);
     Profiler_Init(&game->profiler);
     
+    game->mouse_active = false;
+    game->mouse_pos = (Vec2){ 0.0f, 0.0f };
+
     if (!g_headless_sim) printf("[Game] Initialized Kanto Roguelike Engine.\n");
 }
 
 void Game_HandleEvent(GameState* game, const SDL_Event* event) {
-    if (game->app_state == APP_STATE_STARTER_SELECT) {
+    if (game->app_state == APP_STATE_PLAYING) {
+        if (event->type == SDL_MOUSEMOTION) {
+            game->mouse_active = true;
+            game->mouse_pos = (Vec2){ (float)event->motion.x + game->camera.x,
+                                      (float)event->motion.y + game->camera.y };
+        }
+    } else if (game->app_state == APP_STATE_STARTER_SELECT) {
         if (event->type == SDL_MOUSEMOTION) {
             int mx = event->motion.x;
             int my = event->motion.y;
@@ -790,14 +856,14 @@ void Game_Update(GameState* game, float dt) {
 
             if (e->trap_timer >= e->trap_duration) {
                 e->is_trapped = false;
-                // Pop burst damage + radial splash!
-                float pop_dmg = (55.0f + (float)p->move_basic_level * 18.0f) * p->damage_mult;
+                // Pop burst damage + radial splash (tuned for balanced combat pacing)
+                float pop_dmg = (24.0f + (float)p->move_basic_level * 6.0f) * p->damage_mult;
                 e->hp -= pop_dmg;
                 e->flash_timer = 0.15f;
                 Weapons_SpawnDamageText(game, e->pos, pop_dmg, (SDL_Color){ 90, 230, 255, 255 });
 
                 // Radial splash damage to nearby enemies
-                float splash_r = 85.0f;
+                float splash_r = 75.0f;
                 for (int sn = 0; sn < game->active_enemy_count; sn++) {
                     int se_idx = game->active_enemy_indices[sn];
                     if (se_idx == i) continue;
@@ -807,13 +873,13 @@ void Game_Update(GameState* game, float dt) {
                     float sdy = se->pos.y - e->pos.y;
                     float sdist_sq = sdx * sdx + sdy * sdy;
                     if (sdist_sq <= splash_r * splash_r) {
-                        float splash_dmg = pop_dmg * 0.55f;
+                        float splash_dmg = pop_dmg * 0.45f;
                         se->hp -= splash_dmg;
                         se->flash_timer = 0.10f;
                         float sdist = sqrtf(sdist_sq);
                         if (sdist > 0.001f) {
-                            se->knockback_x += (sdx / sdist) * 220.0f;
-                            se->knockback_y += (sdy / sdist) * 220.0f;
+                            se->knockback_x += (sdx / sdist) * 160.0f;
+                            se->knockback_y += (sdy / sdist) * 160.0f;
                         }
                         Weapons_SpawnDamageText(game, se->pos, splash_dmg, (SDL_Color){ 120, 210, 255, 255 });
                         if (se->hp <= 0.0f) {
@@ -872,9 +938,9 @@ void Game_Update(GameState* game, float dt) {
                     // Charger lines up, halts and winds up when within 230px
                     if (e->attack_cooldown_timer <= 0.0f && dist <= 230.0f) {
                         e->ai_state = ENEMY_AI_WINDUP;
-                        e->state_timer = 0.70f;
+                        e->state_timer = 0.85f; // Readable telegraph window
                         e->charge_dir = (Vec2){ dir_x, dir_y };
-                        e->charge_speed = cfg->speed * 3.4f;
+                        e->charge_speed = cfg->speed * 2.3f;
                         e->vel.x = 0.0f;
                         e->vel.y = 0.0f;
                         e->attack_has_hit = false;
@@ -924,15 +990,15 @@ void Game_Update(GameState* game, float dt) {
                         e->vel.y = dir_y * cfg->speed;
                     } else {
                         float orbit_dir = (i % 2 == 0) ? 1.0f : -1.0f;
-                        e->orbit_angle += orbit_dir * 1.8f * dt;
+                        e->orbit_angle += orbit_dir * 1.1f * dt;
                         float target_x = p->pos.x + cosf(e->orbit_angle) * e->orbit_dist;
                         float target_y = p->pos.y + sinf(e->orbit_angle) * e->orbit_dist;
                         float ox = target_x - e->pos.x;
                         float oy = target_y - e->pos.y;
                         float olen = sqrtf(ox * ox + oy * oy);
                         if (olen > 0.001f) {
-                            e->vel.x = (ox / olen) * cfg->speed * 1.25f;
-                            e->vel.y = (oy / olen) * cfg->speed * 1.25f;
+                            e->vel.x = (ox / olen) * cfg->speed * 1.05f;
+                            e->vel.y = (oy / olen) * cfg->speed * 1.05f;
                         }
                     }
                     e->anim.direction = Sprite_VecToDirection(e->vel.x, e->vel.y, e->anim.direction);
@@ -1040,30 +1106,30 @@ void Game_Update(GameState* game, float dt) {
                             p->pos.y += dir_y * 45.0f;
                         }
                     } else if (cfg->attack_type == ENEMY_ATTACK_RANGED_EMBER) {
-                        Vec2 bvel = { dir_x * 260.0f, dir_y * 260.0f };
-                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 11.0f, cfg->attack_damage, 2.2f, (SDL_Color){ 255, 110, 20, 255 });
+                        Vec2 bvel = { dir_x * 170.0f, dir_y * 170.0f };
+                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 11.0f, cfg->attack_damage, 2.5f, (SDL_Color){ 255, 110, 20, 255 });
                     } else if (cfg->attack_type == ENEMY_ATTACK_RANGED_WATER) {
-                        Vec2 bvel = { dir_x * 240.0f, dir_y * 240.0f };
-                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 12.0f, cfg->attack_damage, 2.2f, (SDL_Color){ 50, 190, 255, 255 });
+                        Vec2 bvel = { dir_x * 160.0f, dir_y * 160.0f };
+                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 12.0f, cfg->attack_damage, 2.5f, (SDL_Color){ 50, 190, 255, 255 });
                     } else if (cfg->attack_type == ENEMY_ATTACK_RANGED_SPARK) {
                         float base_a = atan2f(dir_y, dir_x);
                         for (int sa = -1; sa <= 1; sa++) {
                             float fa = base_a + (float)sa * 0.28f;
-                            Vec2 bvel = { cosf(fa) * 280.0f, sinf(fa) * 280.0f };
-                            Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 10.0f, cfg->attack_damage * 0.8f, 2.0f, (SDL_Color){ 255, 235, 40, 255 });
+                            Vec2 bvel = { cosf(fa) * 180.0f, sinf(fa) * 180.0f };
+                            Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 10.0f, cfg->attack_damage * 0.8f, 2.2f, (SDL_Color){ 255, 235, 40, 255 });
                         }
                     } else if (cfg->attack_type == ENEMY_ATTACK_RANGED_SPORE) {
-                        Vec2 bvel = { dir_x * 120.0f, dir_y * 120.0f };
-                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 14.0f, cfg->attack_damage, 3.0f, (SDL_Color){ 180, 70, 220, 255 });
+                        Vec2 bvel = { dir_x * 90.0f, dir_y * 90.0f };
+                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 14.0f, cfg->attack_damage, 3.2f, (SDL_Color){ 180, 70, 220, 255 });
                     } else if (cfg->attack_type == ENEMY_ATTACK_RANGED_ROCK) {
-                        Vec2 bvel = { dir_x * 220.0f, dir_y * 220.0f };
-                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 13.0f, cfg->attack_damage, 2.4f, (SDL_Color){ 190, 150, 80, 255 });
+                        Vec2 bvel = { dir_x * 150.0f, dir_y * 150.0f };
+                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 13.0f, cfg->attack_damage, 2.5f, (SDL_Color){ 190, 150, 80, 255 });
                     } else if (cfg->attack_type == ENEMY_ATTACK_RANGED_GUST) {
-                        Vec2 bvel = { dir_x * 320.0f, dir_y * 320.0f };
-                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 11.0f, cfg->attack_damage, 1.8f, (SDL_Color){ 180, 230, 255, 255 });
-                    } else if (cfg->attack_type == ENEMY_ATTACK_RANGED_PSYCHIC) {
                         Vec2 bvel = { dir_x * 200.0f, dir_y * 200.0f };
-                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 12.0f, cfg->attack_damage, 2.5f, (SDL_Color){ 240, 70, 160, 255 });
+                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 11.0f, cfg->attack_damage, 2.2f, (SDL_Color){ 180, 230, 255, 255 });
+                    } else if (cfg->attack_type == ENEMY_ATTACK_RANGED_PSYCHIC) {
+                        Vec2 bvel = { dir_x * 140.0f, dir_y * 140.0f };
+                        Weapons_SpawnEnemyProjectile(game, e->pos, bvel, 12.0f, cfg->attack_damage, 2.6f, (SDL_Color){ 240, 70, 160, 255 });
                     }
                 }
                 
@@ -1168,6 +1234,9 @@ void Game_Update(GameState* game, float dt) {
                 if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_STATIONARY) {
                     dmg *= 0.35f; // Harden: 65% damage reduction!
                 }
+                if (game->enemy_types[e->type].is_boss) {
+                    dmg *= 0.65f; // Boss thick armor: mitigates chip damage for longer, epic fights
+                }
                 e->hp -= dmg;
                 e->flash_timer = 0.10f;
                 
@@ -1182,9 +1251,50 @@ void Game_Update(GameState* game, float dt) {
                 
                 Weapons_SpawnDamageText(game, e->pos, dmg, (SDL_Color){ 255, 255, 255, 255 });
                 
-                // If Ember strikes an enemy, spawn fire scorch hazard at enemy position!
-                if (proj->type == PROJ_EMBER) {
-                    Weapons_SpawnGroundHazard(game, HAZARD_FIRE_SCORCH, e->pos, 32.0f, 1.8f, 12.0f * p->damage_mult, false, (SDL_Color){ 255, 110, 20, 230 });
+                // If Ember strikes an enemy, only occasionally spawn fire scorch hazard
+                if (proj->type == PROJ_EMBER && (rand() % 100) < 25) {
+                    Weapons_SpawnGroundHazard(game, HAZARD_FIRE_SCORCH, e->pos, 26.0f, 1.2f, 4.5f * p->damage_mult, false, (SDL_Color){ 255, 110, 20, 230 });
+                }
+
+                // If Fire Blast strikes, spawn molten lava pool!
+                if (proj->type == PROJ_FIRE_BLAST) {
+                    Weapons_SpawnGroundHazard(game, HAZARD_LAVA_POOL, e->pos, 85.0f, 3.2f, 18.0f * p->damage_mult, false, (SDL_Color){ 255, 60, 20, 255 });
+                }
+
+                // If Swift Star with Plasma Tempest strikes, trigger chain lightning
+                if (proj->type == PROJ_SWIFT_STAR) {
+                    for (int w = 0; w < p->weapon_count; w++) {
+                        if (p->weapons[w].type == WEAPON_PLASMA_TEMPEST) {
+                            int chains = 0;
+                            for (int nk = 0; nk < game->active_enemy_count && chains < 3; nk++) {
+                                int ne_idx = game->active_enemy_indices[nk];
+                                if (ne_idx == e_idx) continue;
+                                Enemy* ne = &game->enemies[ne_idx];
+                                if (!ne->active || ne->is_underground) continue;
+                                float cdx = ne->pos.x - e->pos.x;
+                                float cdy = ne->pos.y - e->pos.y;
+                                if (cdx * cdx + cdy * cdy <= 140.0f * 140.0f) {
+                                    float cdmg = 45.0f * p->damage_mult;
+                                    if (game->enemy_types[ne->type].is_boss) cdmg *= 0.65f;
+                                    ne->hp -= cdmg;
+                                    ne->flash_timer = 0.15f;
+                                    Weapons_SpawnDamageText(game, ne->pos, cdmg, (SDL_Color){ 255, 255, 80, 255 });
+                                    chains++;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // If Razor Leaf with Venom Cataclysm strikes, spawn acid mire!
+                if (proj->type == PROJ_RAZOR_LEAF) {
+                    for (int w = 0; w < p->weapon_count; w++) {
+                        if (p->weapons[w].type == WEAPON_VENOM_CATACLYSM) {
+                            Weapons_SpawnGroundHazard(game, HAZARD_ACID_MIRE, e->pos, 45.0f, 2.5f, 10.0f * p->damage_mult, false, (SDL_Color){ 180, 40, 240, 220 });
+                            break;
+                        }
+                    }
                 }
 
                 // If Bubble strikes an enemy, trap them in the bubble!
@@ -1275,21 +1385,11 @@ void Game_Update(GameState* game, float dt) {
                     p->level++;
                     p->xp_to_next_level = (int)(p->xp_to_next_level * 1.30f);
                     
-                    // EVERY 5 LEVELS: Pause game and present 3 level-up choices!
-                    if (p->level % 5 == 0) {
-                        Game_GenerateLevelUpCards(game);
-                        game->app_state = APP_STATE_LEVEL_UP;
-                        game->paused = true;
-                        break;
-                    } else {
-                        // Intermediate levels: Automatic stat progression
-                        p->damage_mult += 0.06f;
-                        p->max_hp += 12.0f;
-                        p->hp += 12.0f;
-                        p->pickup_radius += 5.0f;
-                        snprintf(game->route_banner_text, sizeof(game->route_banner_text), "LEVEL UP! LVL %d (+6%% DMG, +12 HP)", p->level);
-                        game->route_banner_timer = 2.5f;
-                    }
+                    // Roguelike 3-card draft on every level up!
+                    Game_GenerateLevelUpCards(game);
+                    game->app_state = APP_STATE_LEVEL_UP;
+                    game->paused = true;
+                    break;
                 }
             }
         }
@@ -2028,6 +2128,33 @@ void Game_Draw(GameState* game) {
         char ready_str[32];
         snprintf(ready_str, sizeof(ready_str), "[Q] %s", q_name);
         Font_DrawText(renderer, game->font_texture, ready_str, q_x + 8, btn_y + 6, 1, (SDL_Color){ 120, 230, 255, 255 });
+    }
+
+    // Active Weapon Inventory Badges (bottom HUD)
+    int wep_start_x = 316;
+    for (int w = 0; w < MAX_ACTIVE_WEAPONS; w++) {
+        int wx = wep_start_x + w * 120;
+        SDL_Rect wr = { wx, btn_y, 114, 20 };
+        if (w < p->weapon_count && p->weapons[w].type != WEAPON_NONE) {
+            ActiveWeaponSlot* slot = &p->weapons[w];
+            bool evolved = Weapons_IsEvolved(slot->type);
+            SDL_Color wc = Weapons_GetColor(slot->type);
+            SDL_SetRenderDrawColor(renderer, evolved ? 45 : 20, evolved ? 35 : 25, evolved ? 10 : 35, 230);
+            SDL_RenderFillRect(renderer, &wr);
+            SDL_SetRenderDrawColor(renderer, wc.r, wc.g, wc.b, 200);
+            SDL_RenderDrawRect(renderer, &wr);
+            char wtxt[32];
+            if (evolved) {
+                snprintf(wtxt, sizeof(wtxt), "* %s *", Weapons_GetName(slot->type));
+            } else {
+                snprintf(wtxt, sizeof(wtxt), "%s L%d", Weapons_GetName(slot->type), slot->level);
+            }
+            Font_DrawText(renderer, game->font_texture, wtxt, wx + 6, btn_y + 6, 1, wc);
+        } else {
+            SDL_SetRenderDrawColor(renderer, 15, 18, 24, 180);
+            SDL_RenderFillRect(renderer, &wr);
+            Font_DrawText(renderer, game->font_texture, "[EMPTY]", wx + 28, btn_y + 6, 1, (SDL_Color){ 90, 105, 120, 200 });
+        }
     }
 
     // Boss HP Bar (if active gym boss)

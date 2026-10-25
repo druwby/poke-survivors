@@ -12,52 +12,319 @@
 void Weapons_Init(WeaponsManager* wm) {
     // 1. Water Wand (Default primary)
     wm->water_wand.enabled = true;
-    wm->water_wand.cooldown = 0.42f;
+    wm->water_wand.cooldown = 0.55f;
     wm->water_wand.cooldown_timer = 0.0f;
-    wm->water_wand.damage = 25.0f;
-    wm->water_wand.proj_speed = 440.0f;
+    wm->water_wand.damage = 16.0f;
+    wm->water_wand.proj_speed = 260.0f;
     wm->water_wand.proj_radius = 13.0f;
-    wm->water_wand.pierce = 2;
-    wm->water_wand.knockback = 120.0f;
+    wm->water_wand.pierce = 1;
+    wm->water_wand.knockback = 90.0f;
     
     // 2. Orbiters (Aqua Orbs / Fire Spin / Petal Dance)
     wm->orbiters.enabled = false;
     wm->orbiters.cooldown = 0.0f; // Continuous
     wm->orbiters.cooldown_timer = 0.0f;
-    wm->orbiters.damage = 22.0f;
-    wm->orbiters.proj_speed = 3.2f; // Angular speed (rad/sec)
-    wm->orbiters.proj_radius = 17.0f;
+    wm->orbiters.damage = 15.0f;
+    wm->orbiters.proj_speed = 2.4f; // Angular speed (rad/sec)
+    wm->orbiters.proj_radius = 15.0f;
     wm->orbiters.pierce = 999;
-    wm->orbiters.knockback = 160.0f;
+    wm->orbiters.knockback = 120.0f;
     wm->orbiters.orbiter_count = 3;
-    wm->orbiters.orbiter_radius = 120.0f;
-    wm->orbiters.orbiter_speed = 3.6f;
+    wm->orbiters.orbiter_radius = 110.0f;
+    wm->orbiters.orbiter_speed = 2.6f;
     wm->orbiters.orbiter_cycle_timer = 0.0f;
     wm->orbiters.orbiter_active_duration = 3.6f;
-    wm->orbiters.orbiter_cooldown_duration = 2.4f;
-    wm->orbiters.orbiter_current_radius = 120.0f;
+    wm->orbiters.orbiter_cooldown_duration = 3.0f;
+    wm->orbiters.orbiter_current_radius = 110.0f;
     wm->orbiters.orbiter_alpha = 1.0f;
 
     // 3. Cleave (Whip / Slash / Breath)
     wm->cleave.enabled = false;
     wm->cleave.cooldown = 1.15f;
     wm->cleave.cooldown_timer = 0.0f;
-    wm->cleave.damage = 50.0f;
-    wm->cleave.slash_range = 145.0f;
+    wm->cleave.damage = 28.0f;
+    wm->cleave.slash_range = 135.0f;
     wm->cleave.slash_angle = 1.6f; // Radians arc
-    wm->cleave.knockback = 300.0f;
+    wm->cleave.knockback = 180.0f;
 
     // 4. Radial Pulse (Bubble Beam / Flame Burst / Toxic Spore)
     wm->pulse.enabled = false;
-    wm->pulse.cooldown = 2.0f;
+    wm->pulse.cooldown = 2.2f;
     wm->pulse.cooldown_timer = 0.0f;
-    wm->pulse.damage = 42.0f;
-    wm->pulse.pulse_max_radius = 160.0f;
-    wm->pulse.proj_speed = 220.0f; // Expansion rate
-    wm->pulse.knockback = 180.0f;
+    wm->pulse.damage = 22.0f;
+    wm->pulse.pulse_max_radius = 140.0f;
+    wm->pulse.proj_speed = 160.0f; // Expansion rate
+    wm->pulse.knockback = 140.0f;
+}
+
+// -----------------------------------------------------------------------------
+// ROGUELIKE WEAPON SYSTEM: CATALOG & EVOLUTION RECIPES
+// -----------------------------------------------------------------------------
+const EvolutionRecipe g_evolution_recipes[] = {
+    { WEAPON_VINE_WHIP,    WEAPON_PETAL_DANCE,   WEAPON_SOLAR_FRENZY,    "Solar Frenzy",    "FUSION: 4-way solar spline whips + perpetual blooming petal storm!" },
+    { WEAPON_FLAMETHROWER, WEAPON_FIRE_SPIN,     WEAPON_FIRE_BLAST,      "Fire Blast Nova", "FUSION: Molten flame torrent + explosive Fire Blast starbursts & lava pools!" },
+    { WEAPON_BUBBLE_BEAM,  WEAPON_AQUA_ORBS,     WEAPON_HYDRO_VORTEX,    "Hydro Vortex",    "FUSION: Spinning bubble maelstrom suctioning and detonating swarms!" },
+    { WEAPON_SWIFT,        WEAPON_THUNDER_SHOCK, WEAPON_PLASMA_TEMPEST,  "Plasma Tempest",  "FUSION: Homing piercing stars that detonate into chain-lightning arcs!" },
+    { WEAPON_RAZOR_LEAF,   WEAPON_TOXIC_SPORE,   WEAPON_VENOM_CATACLYSM, "Venom Cataclysm", "FUSION: Toxic razor leaves that melt enemy defense and leave corrosive mires!" },
+};
+const int g_evolution_recipe_count = 5;
+
+const char* Weapons_GetName(WeaponType type) {
+    switch (type) {
+        case WEAPON_VINE_WHIP:       return "Vine Whip";
+        case WEAPON_FLAMETHROWER:    return "Flamethrower";
+        case WEAPON_BUBBLE_BEAM:     return "Bubble Beam";
+        case WEAPON_PETAL_DANCE:     return "Petal Dance";
+        case WEAPON_FIRE_SPIN:       return "Fire Spin";
+        case WEAPON_AQUA_ORBS:       return "Aqua Orbs";
+        case WEAPON_RAZOR_LEAF:      return "Razor Leaf";
+        case WEAPON_SWIFT:           return "Swift";
+        case WEAPON_THUNDER_SHOCK:   return "Thunder Shock";
+        case WEAPON_TOXIC_SPORE:     return "Toxic Spore";
+        case WEAPON_SOLAR_FRENZY:    return "Solar Frenzy";
+        case WEAPON_FIRE_BLAST:      return "Fire Blast Nova";
+        case WEAPON_HYDRO_VORTEX:    return "Hydro Vortex";
+        case WEAPON_PLASMA_TEMPEST:  return "Plasma Tempest";
+        case WEAPON_VENOM_CATACLYSM: return "Venom Cataclysm";
+        default:                     return "Unknown";
+    }
+}
+
+const char* Weapons_GetDescription(WeaponType type) {
+    switch (type) {
+        case WEAPON_VINE_WHIP:       return "Procedural wavy vines that lash closest targets with heavy knockback.";
+        case WEAPON_FLAMETHROWER:    return "Directional channeled flame cone that pierces and leaves ground scorch.";
+        case WEAPON_BUBBLE_BEAM:     return "Buoyant floating bubbles that encase enemies, floating then bursting.";
+        case WEAPON_PETAL_DANCE:     return "Blossoming flower petals that extend, spin, and dissipate around you.";
+        case WEAPON_FIRE_SPIN:       return "Fast orbiting blaze fireballs that incinerate close swarms.";
+        case WEAPON_AQUA_ORBS:       return "Pressurized water spheres rotating rapidly with massive hydraulic knockback.";
+        case WEAPON_RAZOR_LEAF:      return "High-velocity sharp leaf blades launched directly at nearby foes.";
+        case WEAPON_SWIFT:           return "Golden homing stars that curve through space to strike targets.";
+        case WEAPON_THUNDER_SHOCK:   return "Crackling vertical lightning bolts that strike down from above.";
+        case WEAPON_TOXIC_SPORE:     return "Expanding poison spore ring that leaves slowing, damaging toxic pools.";
+        case WEAPON_SOLAR_FRENZY:    return "4-way giant solar spline whips + perpetual blooming razor petal storm!";
+        case WEAPON_FIRE_BLAST:      return "Molten flame torrent + explosive Fire Blast starbursts & lava pools!";
+        case WEAPON_HYDRO_VORTEX:    return "Spinning bubble maelstrom suctioning and detonating swarms!";
+        case WEAPON_PLASMA_TEMPEST:  return "Homing piercing stars that detonate into chain-lightning arcs!";
+        case WEAPON_VENOM_CATACLYSM: return "Toxic razor leaves that melt enemy defense and leave corrosive mires!";
+        default:                     return "";
+    }
+}
+
+SDL_Color Weapons_GetColor(WeaponType type) {
+    switch (type) {
+        case WEAPON_VINE_WHIP:       return (SDL_Color){ 80, 220, 90, 255 };
+        case WEAPON_FLAMETHROWER:    return (SDL_Color){ 255, 120, 20, 255 };
+        case WEAPON_BUBBLE_BEAM:     return (SDL_Color){ 80, 210, 255, 255 };
+        case WEAPON_PETAL_DANCE:     return (SDL_Color){ 255, 120, 190, 255 };
+        case WEAPON_FIRE_SPIN:       return (SDL_Color){ 255, 90, 20, 255 };
+        case WEAPON_AQUA_ORBS:       return (SDL_Color){ 60, 160, 255, 255 };
+        case WEAPON_RAZOR_LEAF:      return (SDL_Color){ 100, 235, 70, 255 };
+        case WEAPON_SWIFT:           return (SDL_Color){ 255, 225, 60, 255 };
+        case WEAPON_THUNDER_SHOCK:   return (SDL_Color){ 255, 240, 80, 255 };
+        case WEAPON_TOXIC_SPORE:     return (SDL_Color){ 180, 70, 220, 255 };
+        case WEAPON_SOLAR_FRENZY:    return (SDL_Color){ 255, 230, 80, 255 };
+        case WEAPON_FIRE_BLAST:      return (SDL_Color){ 255, 60, 30, 255 };
+        case WEAPON_HYDRO_VORTEX:    return (SDL_Color){ 40, 220, 255, 255 };
+        case WEAPON_PLASMA_TEMPEST:  return (SDL_Color){ 255, 215, 60, 255 };
+        case WEAPON_VENOM_CATACLYSM: return (SDL_Color){ 200, 60, 255, 255 };
+        default:                     return (SDL_Color){ 220, 220, 220, 255 };
+    }
+}
+
+bool Weapons_IsEvolved(WeaponType type) {
+    return (type >= WEAPON_SOLAR_FRENZY && type <= WEAPON_VENOM_CATACLYSM);
+}
+
+static void Weapons_InitSlot(ActiveWeaponSlot* slot, WeaponType type, int level) {
+    slot->type = type;
+    slot->level = level;
+    slot->state_timer = 0.0f;
+    float lvl_m = 1.0f + (float)(level - 1) * 0.22f;
+
+    switch (type) {
+        case WEAPON_VINE_WHIP:
+            slot->cooldown = 0.95f - (float)(level - 1) * 0.04f;
+            slot->damage = 42.0f * lvl_m;
+            slot->range = 150.0f + (float)(level - 1) * 10.0f;
+            slot->knockback = 220.0f;
+            slot->count = 1 + (level - 1) / 2; // 1 at Lv 1-2, 2 at Lv 3-4, 3 at Lv 5
+            break;
+            
+        case WEAPON_FLAMETHROWER:
+            slot->cooldown = 0.15f;
+            slot->damage = 12.0f * lvl_m;
+            slot->proj_speed = 280.0f + (float)(level - 1) * 20.0f;
+            slot->proj_radius = 15.0f + (float)(level - 1) * 2.0f;
+            slot->pierce = 2 + (level - 1);
+            slot->knockback = 45.0f;
+            break;
+            
+        case WEAPON_BUBBLE_BEAM:
+            slot->cooldown = 0.60f - (float)(level - 1) * 0.03f;
+            slot->damage = 20.0f * lvl_m;
+            slot->proj_speed = 145.0f;
+            slot->proj_radius = 18.0f + (float)(level - 1) * 2.0f;
+            slot->count = 1 + (level - 1);
+            slot->pierce = 1;
+            slot->knockback = 50.0f;
+            break;
+            
+        case WEAPON_PETAL_DANCE:
+            slot->cooldown = 2.8f;
+            slot->damage = 18.0f * lvl_m;
+            slot->proj_radius = 15.0f;
+            slot->count = 3 + (level - 1);
+            slot->knockback = 110.0f;
+            slot->range = 115.0f;
+            break;
+            
+        case WEAPON_FIRE_SPIN:
+            slot->cooldown = 0.0f;
+            slot->damage = 15.0f * lvl_m;
+            slot->proj_radius = 14.0f;
+            slot->count = 2 + (level - 1);
+            slot->knockback = 70.0f;
+            slot->range = 80.0f;
+            break;
+            
+        case WEAPON_AQUA_ORBS:
+            slot->cooldown = 0.0f;
+            slot->damage = 16.0f * lvl_m;
+            slot->proj_radius = 16.0f;
+            slot->count = 2 + (level - 1);
+            slot->knockback = 240.0f;
+            slot->range = 100.0f;
+            break;
+            
+        case WEAPON_RAZOR_LEAF:
+            slot->cooldown = 0.85f - (float)(level - 1) * 0.05f;
+            slot->damage = 22.0f * lvl_m;
+            slot->proj_speed = 340.0f;
+            slot->proj_radius = 12.0f;
+            slot->pierce = 2 + (level - 1);
+            slot->count = 2 + (level - 1);
+            slot->knockback = 90.0f;
+            break;
+            
+        case WEAPON_SWIFT:
+            slot->cooldown = 0.90f - (float)(level - 1) * 0.05f;
+            slot->damage = 18.0f * lvl_m;
+            slot->proj_speed = 280.0f;
+            slot->proj_radius = 11.0f;
+            slot->pierce = 1;
+            slot->count = 2 + (level - 1);
+            slot->knockback = 60.0f;
+            break;
+            
+        case WEAPON_THUNDER_SHOCK:
+            slot->cooldown = 1.35f - (float)(level - 1) * 0.08f;
+            slot->damage = 40.0f * lvl_m;
+            slot->range = 240.0f;
+            slot->count = 1 + (level - 1);
+            slot->knockback = 120.0f;
+            break;
+            
+        case WEAPON_TOXIC_SPORE:
+            slot->cooldown = 1.75f - (float)(level - 1) * 0.10f;
+            slot->damage = 22.0f * lvl_m;
+            slot->range = 130.0f + (float)(level - 1) * 15.0f;
+            slot->knockback = 60.0f;
+            break;
+            
+        // EVOLVED WEAPONS (FUSIONS)
+        case WEAPON_SOLAR_FRENZY:
+            slot->cooldown = 0.65f;
+            slot->damage = 75.0f;
+            slot->range = 180.0f;
+            slot->count = 4; // 4-way solar spline whips!
+            slot->knockback = 340.0f;
+            break;
+            
+        case WEAPON_FIRE_BLAST:
+            slot->cooldown = 0.12f;
+            slot->damage = 20.0f;
+            slot->proj_speed = 320.0f;
+            slot->proj_radius = 18.0f;
+            slot->pierce = 4;
+            slot->knockback = 60.0f;
+            break;
+            
+        case WEAPON_HYDRO_VORTEX:
+            slot->cooldown = 0.45f;
+            slot->damage = 48.0f;
+            slot->proj_speed = 160.0f;
+            slot->proj_radius = 24.0f;
+            slot->count = 6;
+            slot->knockback = 350.0f;
+            break;
+            
+        case WEAPON_PLASMA_TEMPEST:
+            slot->cooldown = 0.65f;
+            slot->damage = 36.0f;
+            slot->proj_speed = 340.0f;
+            slot->proj_radius = 13.0f;
+            slot->count = 5;
+            slot->knockback = 120.0f;
+            break;
+            
+        case WEAPON_VENOM_CATACLYSM:
+            slot->cooldown = 0.70f;
+            slot->damage = 38.0f;
+            slot->proj_speed = 360.0f;
+            slot->proj_radius = 14.0f;
+            slot->count = 5;
+            slot->pierce = 99;
+            slot->knockback = 100.0f;
+            break;
+            
+        default:
+            break;
+    }
+    slot->cooldown_timer = 0.0f;
+}
+
+bool Weapons_AddWeapon(GameState* game, WeaponType type) {
+    Player* p = &game->player;
+    if (p->weapon_count >= MAX_ACTIVE_WEAPONS) return false;
+    int idx = p->weapon_count;
+    Weapons_InitSlot(&p->weapons[idx], type, 1);
+    p->weapon_count++;
+    return true;
+}
+
+void Weapons_UpgradeWeapon(GameState* game, int slot_index) {
+    Player* p = &game->player;
+    if (slot_index < 0 || slot_index >= p->weapon_count) return;
+    ActiveWeaponSlot* slot = &p->weapons[slot_index];
+    if (slot->level >= 5 || Weapons_IsEvolved(slot->type)) return;
+    slot->level++;
+    Weapons_InitSlot(slot, slot->type, slot->level);
+}
+
+void Weapons_EvolveWeapon(GameState* game, int slot_a, int slot_b, WeaponType evolved_type) {
+    Player* p = &game->player;
+    if (slot_a < 0 || slot_a >= p->weapon_count) return;
+    if (slot_b < 0 || slot_b >= p->weapon_count) return;
+    if (slot_a == slot_b) return;
+
+    // Transform slot_a into evolved fusion weapon
+    Weapons_InitSlot(&p->weapons[slot_a], evolved_type, 1);
+
+    // Remove slot_b and shift remaining weapons down (frees up weapon slot!)
+    for (int i = slot_b; i < p->weapon_count - 1; i++) {
+        p->weapons[i] = p->weapons[i + 1];
+    }
+    p->weapon_count--;
+    memset(&p->weapons[p->weapon_count], 0, sizeof(ActiveWeaponSlot));
 }
 
 void Weapons_InitForStarter(GameState* game, StarterID starter) {
+    Player* p = &game->player;
+    p->weapon_count = 0;
+    p->aim_dir = (Vec2){ 1.0f, 0.0f };
+    memset(p->weapons, 0, sizeof(p->weapons));
+
     WeaponsManager* wm = &game->weapons;
     Weapons_Init(wm); // Set default radius, speeds, knockbacks
     wm->water_wand.enabled = false;
@@ -65,35 +332,32 @@ void Weapons_InitForStarter(GameState* game, StarterID starter) {
     wm->cleave.enabled = false;
     wm->pulse.enabled = false;
 
-    // Each starter begins with strictly ONE basic attack!
+    // Each starter begins with strictly ONE signature attack!
     if (starter == STARTER_BULBASAUR) {
-        wm->cleave.enabled = true; // Vine Whip (Heavy hitting multi-vine lash)
-        wm->cleave.damage = 85.0f; // Buffed to hit hard!
-        wm->cleave.cooldown = 0.88f;
-        wm->cleave.slash_range = 160.0f;
-        wm->cleave.knockback = 340.0f;
-
-        // Petal Dance config when learned
-        wm->orbiters.orbiter_active_duration = 3.6f;
-        wm->orbiters.orbiter_cooldown_duration = 2.4f;
-        wm->orbiters.orbiter_radius = 130.0f;
-        wm->orbiters.damage = 38.0f;
+        Weapons_AddWeapon(game, WEAPON_VINE_WHIP);
+        wm->cleave.enabled = true;
+        wm->cleave.damage = 42.0f;
+        wm->cleave.cooldown = 0.95f;
+        wm->cleave.slash_range = 150.0f;
+        wm->cleave.knockback = 220.0f;
     } else if (starter == STARTER_CHARMANDER) {
-        wm->water_wand.enabled = true; // Directional Flamethrower (Only points wherever player points)
-        wm->water_wand.damage = 18.0f;
-        wm->water_wand.cooldown = 0.08f; // ~12.5 flames/sec high-speed channeled stream
-        wm->water_wand.proj_speed = 440.0f;
-        wm->water_wand.proj_radius = 16.0f;
-        wm->water_wand.pierce = 3;
-        wm->water_wand.knockback = 75.0f;
-    } else if (starter == STARTER_SQUIRTLE) {
-        wm->water_wand.enabled = true; // Bubble Beam (Slow moving bubbles that trap and pop enemies)
-        wm->water_wand.damage = 22.0f;
-        wm->water_wand.cooldown = 0.48f;
-        wm->water_wand.proj_speed = 210.0f; // Slow floating buoyant bubbles
-        wm->water_wand.proj_radius = 20.0f; // Large iridescent soap bubbles
-        wm->water_wand.pierce = 1;
+        Weapons_AddWeapon(game, WEAPON_FLAMETHROWER);
+        wm->water_wand.enabled = true;
+        wm->water_wand.damage = 12.0f;
+        wm->water_wand.cooldown = 0.15f;
+        wm->water_wand.proj_speed = 280.0f;
+        wm->water_wand.proj_radius = 15.0f;
+        wm->water_wand.pierce = 2;
         wm->water_wand.knockback = 45.0f;
+    } else if (starter == STARTER_SQUIRTLE) {
+        Weapons_AddWeapon(game, WEAPON_BUBBLE_BEAM);
+        wm->water_wand.enabled = true;
+        wm->water_wand.damage = 20.0f;
+        wm->water_wand.cooldown = 0.60f;
+        wm->water_wand.proj_speed = 145.0f;
+        wm->water_wand.proj_radius = 18.0f;
+        wm->water_wand.pierce = 1;
+        wm->water_wand.knockback = 50.0f;
     }
 }
 
@@ -160,14 +424,14 @@ void Weapons_SpawnGroundHazard(GameState* game, HazardType type, Vec2 pos, float
     }
 }
 
-void Weapons_FireVineWhip(GameState* game) {
+void Weapons_FireVineWhip(GameState* game, ActiveWeaponSlot* slot) {
     Player* p = &game->player;
-    int max_vines = p->move_basic_level;
+    int max_vines = slot->count;
     if (max_vines < 1) max_vines = 1;
     if (max_vines > 4) max_vines = 4;
 
-    float reach = game->weapons.cleave.slash_range;
-    if (reach < 160.0f) reach = 160.0f;
+    float reach = slot->range;
+    if (reach < 150.0f) reach = 150.0f;
 
     // Find up to max_vines closest enemies within reach
     int targets[4] = { -1, -1, -1, -1 };
@@ -183,30 +447,20 @@ void Weapons_FireVineWhip(GameState* game) {
         float d_sq = dx * dx + dy * dy;
         if (d_sq > reach * reach) continue;
 
-        for (int slot = 0; slot < max_vines; slot++) {
-            if (d_sq < target_dists[slot]) {
-                for (int s = max_vines - 1; s > slot; s--) {
+        for (int s_idx = 0; s_idx < max_vines; s_idx++) {
+            if (d_sq < target_dists[s_idx]) {
+                for (int s = max_vines - 1; s > s_idx; s--) {
                     targets[s] = targets[s - 1];
                     target_dists[s] = target_dists[s - 1];
                 }
-                targets[slot] = e_idx;
-                target_dists[slot] = d_sq;
+                targets[s_idx] = e_idx;
+                target_dists[s_idx] = d_sq;
                 break;
             }
         }
     }
 
-    float base_angle = 0.0f;
-    switch (p->anim.direction) {
-        case 0: base_angle = (float)M_PI * 0.5f; break;  // Down
-        case 1: base_angle = (float)M_PI * 0.25f; break; // Down-Right
-        case 2: base_angle = 0.0f; break;                // Right
-        case 3: base_angle = -(float)M_PI * 0.25f; break;// Up-Right
-        case 4: base_angle = -(float)M_PI * 0.5f; break; // Up
-        case 5: base_angle = -(float)M_PI * 0.75f; break;// Up-Left
-        case 6: base_angle = (float)M_PI; break;         // Left
-        case 7: base_angle = (float)M_PI * 0.75f; break; // Down-Left
-    }
+    float base_angle = atan2f(p->aim_dir.y, p->aim_dir.x);
 
     // Launch each vine towards its target or fan out
     for (int v = 0; v < max_vines; v++) {
@@ -239,9 +493,9 @@ void Weapons_FireVineWhip(GameState* game) {
                 vs->length = vlen;
                 vs->max_length = vlen + 25.0f;
                 vs->timer = 0.0f;
-                vs->max_duration = 0.22f;
-                vs->damage = game->weapons.cleave.damage * p->damage_mult;
-                vs->knockback = game->weapons.cleave.knockback;
+                vs->max_duration = 0.30f;
+                vs->damage = slot->damage * p->damage_mult;
+                vs->knockback = slot->knockback;
                 vs->wave_seed = (float)v * 1.57f + (float)(rand() % 10) * 0.2f;
                 vs->struck = false;
                 break;
@@ -250,298 +504,498 @@ void Weapons_FireVineWhip(GameState* game) {
     }
 }
 
-void Weapons_FireWaterWand(GameState* game) {
+void Weapons_FireFlamethrower(GameState* game, ActiveWeaponSlot* slot) {
     Player* p = &game->player;
+    Vec2 flame_dir = p->aim_dir;
+    float base_flame_a = atan2f(flame_dir.y, flame_dir.x);
+    float cone_spread = 0.28f + (float)(slot->level - 1) * 0.05f;
+    float rnd_offset = (((float)(rand() % 100) / 100.0f) - 0.5f) * cone_spread;
+    float fire_a = base_flame_a + rnd_offset;
 
-    // Find closest enemy within 600px range
-    float min_dist_sq = 600.0f * 600.0f;
-    int target_idx = -1;
-    
-    for (int k = 0; k < game->active_enemy_count; k++) {
-        int i = game->active_enemy_indices[k];
-        if (game->enemies[i].is_underground) continue; // Diglett is untargetable underground!
-        float dx = game->enemies[i].pos.x - p->pos.x;
-        if (fabsf(dx) > 600.0f) continue;
-        float dy = game->enemies[i].pos.y - p->pos.y;
-        if (fabsf(dy) > 600.0f) continue;
-        float dist_sq = dx * dx + dy * dy;
-        if (dist_sq < min_dist_sq) {
-            min_dist_sq = dist_sq;
-            target_idx = i;
-        }
-    }
-    
-    Vec2 dir = { 1.0f, 0.0f };
-    if (target_idx != -1) {
-        float dx = game->enemies[target_idx].pos.x - p->pos.x;
-        float dy = game->enemies[target_idx].pos.y - p->pos.y;
-        float len = sqrtf(dx * dx + dy * dy);
-        if (len > 0.0001f) {
-            dir.x = dx / len;
-            dir.y = dy / len;
-        }
-    } else {
-        // Fire in facing direction
-        switch (p->anim.direction) {
-            case 0: dir = (Vec2){ 0.0f, 1.0f }; break;
-            case 1: dir = (Vec2){ 0.707f, 0.707f }; break;
-            case 2: dir = (Vec2){ 1.0f, 0.0f }; break;
-            case 3: dir = (Vec2){ 0.707f, -0.707f }; break;
-            case 4: dir = (Vec2){ 0.0f, -1.0f }; break;
-            case 5: dir = (Vec2){ -0.707f, -0.707f }; break;
-            case 6: dir = (Vec2){ -1.0f, 0.0f }; break;
-            case 7: dir = (Vec2){ -0.707f, 0.707f }; break;
-        }
-    }
-    
-    float base_a = atan2f(dir.y, dir.x);
-
-    if (p->starter == STARTER_CHARMANDER) {
-        // CHARMANDER: Directional Flamethrower (STRICTLY wherever player is pointing, sweeps with WASD)
-        Vec2 flame_dir = { 1.0f, 0.0f };
-        switch (p->anim.direction) {
-            case 0: flame_dir = (Vec2){  0.0f,  1.0f }; break; // Down
-            case 1: flame_dir = (Vec2){  0.707f,  0.707f }; break; // Down-Right
-            case 2: flame_dir = (Vec2){  1.0f,  0.0f }; break; // Right
-            case 3: flame_dir = (Vec2){  0.707f, -0.707f }; break; // Up-Right
-            case 4: flame_dir = (Vec2){  0.0f, -1.0f }; break; // Up
-            case 5: flame_dir = (Vec2){ -0.707f, -0.707f }; break; // Up-Left
-            case 6: flame_dir = (Vec2){ -1.0f,  0.0f }; break; // Left
-            case 7: flame_dir = (Vec2){ -0.707f,  0.707f }; break; // Down-Left
-        }
-        float base_flame_a = atan2f(flame_dir.y, flame_dir.x);
-        float cone_spread = 0.28f + (float)(p->move_basic_level - 1) * 0.06f;
-        float rnd_offset = (((float)(rand() % 100) / 100.0f) - 0.5f) * cone_spread;
-        float fire_a = base_flame_a + rnd_offset;
-
-        Projectile* proj = AllocProjectile(game);
-        if (proj) {
-            proj->type = PROJ_EMBER;
-            proj->color = (SDL_Color){ 255, 120, 20, 255 };
-            // Fire stream emerges from player's snout along facing vector
-            proj->pos.x = p->pos.x + flame_dir.x * 14.0f;
-            proj->pos.y = p->pos.y + flame_dir.y * 14.0f;
-            float spd = game->weapons.water_wand.proj_speed * (0.85f + (float)(rand() % 30) * 0.01f);
-            proj->vel.x = cosf(fire_a) * spd;
-            proj->vel.y = sinf(fire_a) * spd;
-            proj->radius = game->weapons.water_wand.proj_radius + (float)(p->move_basic_level - 1) * 2.5f;
-            proj->damage = game->weapons.water_wand.damage * p->damage_mult;
-            proj->pierce_left = 3 + (p->move_basic_level - 1);
-            proj->knockback = game->weapons.water_wand.knockback;
-            proj->lifetime = 0.0f;
-            proj->max_lifetime = 0.40f + (float)(p->move_basic_level - 1) * 0.05f; // Travels ~175px
-            proj->is_enemy = false;
-        }
-        return;
-    } else if (p->starter == STARTER_SQUIRTLE) {
-        // SQUIRTLE: Bubble Beam (Slow moving buoyant bubbles that trap enemies and pop)
-        int bubble_count = p->move_basic_level;
-        if (bubble_count < 1) bubble_count = 1;
-        if (bubble_count > 3) bubble_count = 3;
-
-        for (int b = 0; b < bubble_count; b++) {
-            float angle_offset = ((float)b - (float)(bubble_count - 1) * 0.5f) * 0.22f;
-            float bubble_a = base_a + angle_offset;
-            Projectile* proj = AllocProjectile(game);
-            if (!proj) break;
-            proj->type = PROJ_BUBBLE;
-            proj->color = (SDL_Color){ 80, 220, 255, 230 };
-            proj->pos = p->pos;
-            proj->pos.x += -dir.y * ((float)b - (float)(bubble_count - 1) * 0.5f) * 10.0f;
-            proj->pos.y +=  dir.x * ((float)b - (float)(bubble_count - 1) * 0.5f) * 10.0f;
-            proj->vel.x = cosf(bubble_a) * game->weapons.water_wand.proj_speed;
-            proj->vel.y = sinf(bubble_a) * game->weapons.water_wand.proj_speed;
-            proj->radius = game->weapons.water_wand.proj_radius + (float)(p->move_basic_level - 1) * 2.0f;
-            proj->damage = game->weapons.water_wand.damage * p->damage_mult;
-            proj->pierce_left = 1; // 1 enemy encased per bubble
-            proj->knockback = game->weapons.water_wand.knockback;
-            proj->lifetime = 0.0f;
-            proj->max_lifetime = 2.4f; // Floats for up to 2.4s
-            proj->is_enemy = false;
-        }
-        return;
-    } else {
-        // BULBASAUR RAZOR LEAF (Fast spinning aerodynamic leaf blades)
-        Projectile* proj = AllocProjectile(game);
-        if (!proj) return;
-        proj->type = PROJ_RAZOR_LEAF;
-        proj->color = (SDL_Color){ 90, 240, 80, 255 };
-        proj->pos = p->pos;
-        proj->vel.x = dir.x * 520.0f;
-        proj->vel.y = dir.y * 520.0f;
-        proj->radius = 14.0f;
-        proj->damage = game->weapons.water_wand.damage * p->damage_mult * 1.25f;
-        proj->pierce_left = 4;
-        proj->knockback = 120.0f;
+    Projectile* proj = AllocProjectile(game);
+    if (proj) {
+        proj->type = PROJ_EMBER;
+        proj->color = (SDL_Color){ 255, 120, 20, 255 };
+        proj->pos.x = p->pos.x + flame_dir.x * 14.0f;
+        proj->pos.y = p->pos.y + flame_dir.y * 14.0f;
+        float spd = slot->proj_speed * (0.85f + (float)(rand() % 30) * 0.01f);
+        proj->vel.x = cosf(fire_a) * spd;
+        proj->vel.y = sinf(fire_a) * spd;
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = slot->pierce;
+        proj->knockback = slot->knockback;
         proj->lifetime = 0.0f;
-        proj->max_lifetime = 1.4f;
+        proj->max_lifetime = 0.60f;
         proj->is_enemy = false;
     }
 }
 
-void Weapons_FireCleave(GameState* game) {
-    float base_angle = 0.0f;
-    switch (game->player.anim.direction) {
-        case 0: base_angle = (float)M_PI * 0.5f; break;  // Down
-        case 1: base_angle = (float)M_PI * 0.25f; break; // Down-Right
-        case 2: base_angle = 0.0f; break;                // Right
-        case 3: base_angle = -(float)M_PI * 0.25f; break;// Up-Right
-        case 4: base_angle = -(float)M_PI * 0.5f; break; // Up
-        case 5: base_angle = -(float)M_PI * 0.75f; break;// Up-Left
-        case 6: base_angle = (float)M_PI; break;         // Left
-        case 7: base_angle = (float)M_PI * 0.75f; break; // Down-Left
-    }
-    
-    Projectile* p = AllocProjectile(game);
-    if (!p) return;
-    
-    p->type = PROJ_SLASH;
-    p->pos = game->player.pos;
-    p->vel.x = cosf(base_angle);
-    p->vel.y = sinf(base_angle);
-    p->radius = game->weapons.cleave.slash_range;
-    p->damage = game->weapons.cleave.damage * game->player.damage_mult;
-    p->pierce_left = 999;
-    p->knockback = game->weapons.cleave.knockback;
-    p->orbit_angle = base_angle;
-    p->orbit_dist = game->weapons.cleave.slash_angle;
-    p->lifetime = 0.0f;
-    p->max_lifetime = 0.22f;
-    p->is_enemy = false;
+void Weapons_FireBubbleBeam(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+    int bubble_count = slot->count;
+    if (bubble_count < 1) bubble_count = 1;
+    if (bubble_count > 5) bubble_count = 5;
 
-    if (game->player.starter == STARTER_BULBASAUR) {
-        p->color = (SDL_Color){ 70, 220, 70, 255 }; // Green Vine Whip
-    } else if (game->player.starter == STARTER_CHARMANDER) {
-        p->color = (SDL_Color){ 255, 110, 30, 255 }; // Fiery Dragon Breath
-    } else {
-        p->color = (SDL_Color){ 50, 190, 255, 255 }; // Aqua Jet
+    for (int b = 0; b < bubble_count; b++) {
+        float angle_offset = ((float)b - (float)(bubble_count - 1) * 0.5f) * 0.20f;
+        float bubble_a = base_a + angle_offset;
+        Projectile* proj = AllocProjectile(game);
+        if (!proj) break;
+        proj->type = PROJ_BUBBLE;
+        proj->color = (SDL_Color){ 80, 220, 255, 230 };
+        proj->pos = p->pos;
+        proj->pos.x += -dir.y * ((float)b - (float)(bubble_count - 1) * 0.5f) * 10.0f;
+        proj->pos.y +=  dir.x * ((float)b - (float)(bubble_count - 1) * 0.5f) * 10.0f;
+        proj->vel.x = cosf(bubble_a) * slot->proj_speed;
+        proj->vel.y = sinf(bubble_a) * slot->proj_speed;
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = slot->pierce;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 2.4f;
+        proj->is_enemy = false;
     }
 }
 
-void Weapons_FirePulse(GameState* game) {
-    Projectile* p = AllocProjectile(game);
-    if (!p) return;
-    
-    p->type = PROJ_PULSE_RING;
-    p->pos = game->player.pos;
-    p->vel = (Vec2){ 0.0f, 0.0f };
-    p->radius = 10.0f;
-    p->damage = game->weapons.pulse.damage * game->player.damage_mult;
-    p->pierce_left = 999;
-    p->knockback = game->weapons.pulse.knockback;
-    p->lifetime = 0.0f;
-    p->max_lifetime = game->weapons.pulse.pulse_max_radius / game->weapons.pulse.proj_speed;
-    p->is_enemy = false;
+void Weapons_FireRazorLeaf(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+    int count = slot->count;
+    if (count < 1) count = 1;
 
-    if (game->player.starter == STARTER_BULBASAUR) {
-        p->color = (SDL_Color){ 160, 70, 210, 255 }; // Toxic Spore Ring
-    } else if (game->player.starter == STARTER_CHARMANDER) {
-        p->color = (SDL_Color){ 255, 140, 20, 255 }; // Flame Burst
-    } else {
-        p->color = (SDL_Color){ 60, 210, 240, 255 }; // Bubble Beam
+    for (int i = 0; i < count; i++) {
+        float offset = ((float)i - (float)(count - 1) * 0.5f) * 0.20f;
+        float leaf_a = base_a + offset;
+        Projectile* proj = AllocProjectile(game);
+        if (!proj) break;
+        proj->type = PROJ_RAZOR_LEAF;
+        proj->color = (SDL_Color){ 90, 240, 80, 255 };
+        proj->pos = p->pos;
+        proj->vel.x = cosf(leaf_a) * slot->proj_speed;
+        proj->vel.y = sinf(leaf_a) * slot->proj_speed;
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = slot->pierce;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 1.2f;
+        proj->is_enemy = false;
     }
+}
+
+void Weapons_FireSwift(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+    int count = slot->count;
+    if (count < 1) count = 1;
+
+    for (int i = 0; i < count; i++) {
+        float offset = ((float)i - (float)(count - 1) * 0.5f) * 0.35f;
+        float star_a = base_a + offset;
+        Projectile* proj = AllocProjectile(game);
+        if (!proj) break;
+        proj->type = PROJ_SWIFT_STAR;
+        proj->color = (SDL_Color){ 255, 230, 60, 255 };
+        proj->pos = p->pos;
+        proj->vel.x = cosf(star_a) * slot->proj_speed;
+        proj->vel.y = sinf(star_a) * slot->proj_speed;
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = slot->pierce;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 2.0f;
+        proj->is_enemy = false;
+    }
+}
+
+void Weapons_FireThunderShock(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    int count = slot->count;
+    if (count < 1) count = 1;
+
+    int cand_count = 0;
+    int candidates[64];
+    for (int k = 0; k < game->active_enemy_count && cand_count < 64; k++) {
+        int e_idx = game->active_enemy_indices[k];
+        Enemy* e = &game->enemies[e_idx];
+        if (!e->active || e->is_underground) continue;
+        float dx = e->pos.x - p->pos.x;
+        float dy = e->pos.y - p->pos.y;
+        if (dx * dx + dy * dy <= slot->range * slot->range) {
+            candidates[cand_count++] = e_idx;
+        }
+    }
+
+    if (cand_count == 0) return;
+
+    for (int c = 0; c < count; c++) {
+        int pick = rand() % cand_count;
+        int e_idx = candidates[pick];
+        Enemy* e = &game->enemies[e_idx];
+
+        Projectile* proj = AllocProjectile(game);
+        if (proj) {
+            proj->type = PROJ_LIGHTNING_BOLT;
+            proj->color = (SDL_Color){ 255, 255, 120, 255 };
+            proj->pos = e->pos;
+            proj->vel = (Vec2){ 0.0f, 0.0f };
+            proj->radius = 28.0f;
+            proj->damage = slot->damage * p->damage_mult;
+            proj->pierce_left = 99;
+            proj->knockback = slot->knockback;
+            proj->lifetime = 0.0f;
+            proj->max_lifetime = 0.22f;
+            proj->is_enemy = false;
+        }
+
+        float dmg = slot->damage * p->damage_mult;
+        if (game->enemy_types[e->type].is_boss) dmg *= 0.65f;
+        e->hp -= dmg;
+        e->flash_timer = 0.18f;
+        Weapons_SpawnDamageText(game, e->pos, dmg, (SDL_Color){ 255, 255, 80, 255 });
+    }
+}
+
+void Weapons_FireToxicSpore(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Projectile* proj = AllocProjectile(game);
+    if (proj) {
+        proj->type = PROJ_PULSE_RING;
+        proj->color = (SDL_Color){ 175, 75, 220, 255 };
+        proj->pos = p->pos;
+        proj->vel = (Vec2){ 0.0f, 0.0f };
+        proj->radius = 12.0f;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = 999;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = slot->range / 160.0f;
+        proj->is_enemy = false;
+    }
+    Weapons_SpawnGroundHazard(game, HAZARD_TOXIC_SPORE, p->pos, 42.0f, 2.0f, 6.0f * p->damage_mult, false, (SDL_Color){ 160, 60, 210, 200 });
+}
+
+// -----------------------------------------------------------------------------
+// EVOLVED FUSION WEAPONS
+// -----------------------------------------------------------------------------
+void Weapons_FireSolarFrenzy(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    // 4 cardinal giant solar whips
+    for (int v = 0; v < 4; v++) {
+        float angle = (float)v * ((float)M_PI * 0.5f);
+        Vec2 dir = { cosf(angle), sinf(angle) };
+        Vec2 dest = { p->pos.x + dir.x * slot->range, p->pos.y + dir.y * slot->range };
+
+        for (int i = 0; i < MAX_VINE_STRIKES; i++) {
+            if (!game->vine_strikes[i].active) {
+                VineWhipStrike* vs = &game->vine_strikes[i];
+                vs->active = true;
+                vs->start_pos = p->pos;
+                vs->target_pos = dest;
+                vs->dir = dir;
+                vs->length = slot->range;
+                vs->max_length = slot->range + 30.0f;
+                vs->timer = 0.0f;
+                vs->max_duration = 0.28f;
+                vs->damage = slot->damage * p->damage_mult;
+                vs->knockback = slot->knockback;
+                vs->wave_seed = (float)v * 1.57f;
+                vs->struck = false;
+                break;
+            }
+        }
+    }
+}
+
+void Weapons_FireFireBlast(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    // Triple molten flame spray along aim direction
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+    for (int i = -1; i <= 1; i++) {
+        float fire_a = base_a + (float)i * 0.16f;
+        Projectile* proj = AllocProjectile(game);
+        if (proj) {
+            proj->type = PROJ_EMBER;
+            proj->color = (SDL_Color){ 255, 90, 20, 255 };
+            proj->pos = p->pos;
+            proj->vel.x = cosf(fire_a) * slot->proj_speed;
+            proj->vel.y = sinf(fire_a) * slot->proj_speed;
+            proj->radius = slot->proj_radius;
+            proj->damage = slot->damage * p->damage_mult;
+            proj->pierce_left = slot->pierce;
+            proj->knockback = slot->knockback;
+            proj->lifetime = 0.0f;
+            proj->max_lifetime = 0.65f;
+            proj->is_enemy = false;
+        }
+    }
+
+    // Periodic explosive Fire Blast kanji "大" starburst!
+    slot->state_timer += slot->cooldown;
+    if (slot->state_timer >= 1.2f) {
+        slot->state_timer -= 1.2f;
+        Projectile* fb = AllocProjectile(game);
+        if (fb) {
+            fb->type = PROJ_FIRE_BLAST;
+            fb->color = (SDL_Color){ 255, 60, 20, 255 };
+            fb->pos = p->pos;
+            fb->vel.x = dir.x * 240.0f;
+            fb->vel.y = dir.y * 240.0f;
+            fb->radius = 26.0f;
+            fb->damage = slot->damage * 2.5f * p->damage_mult;
+            fb->pierce_left = 3;
+            fb->knockback = 180.0f;
+            fb->lifetime = 0.0f;
+            fb->max_lifetime = 1.3f;
+            fb->is_enemy = false;
+        }
+    }
+}
+
+void Weapons_FireHydroVortex(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+
+    // Launch heavy explosive bubble bomb
+    Projectile* proj = AllocProjectile(game);
+    if (proj) {
+        proj->type = PROJ_BUBBLE;
+        proj->color = (SDL_Color){ 40, 220, 255, 240 };
+        proj->pos = p->pos;
+        proj->vel.x = cosf(base_a) * slot->proj_speed;
+        proj->vel.y = sinf(base_a) * slot->proj_speed;
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = 1;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 1.8f;
+        proj->is_enemy = false;
+    }
+}
+
+void Weapons_FirePlasmaTempest(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+
+    for (int i = 0; i < slot->count; i++) {
+        float offset = ((float)i - (float)(slot->count - 1) * 0.5f) * 0.28f;
+        float star_a = base_a + offset;
+        Projectile* proj = AllocProjectile(game);
+        if (!proj) break;
+        proj->type = PROJ_SWIFT_STAR;
+        proj->color = (SDL_Color){ 255, 240, 80, 255 };
+        proj->pos = p->pos;
+        proj->vel.x = cosf(star_a) * slot->proj_speed;
+        proj->vel.y = sinf(star_a) * slot->proj_speed;
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = 1;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 2.2f;
+        proj->is_enemy = false;
+    }
+}
+
+void Weapons_FireVenomCataclysm(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+
+    for (int i = 0; i < slot->count; i++) {
+        float offset = ((float)i - (float)(slot->count - 1) * 0.5f) * 0.22f;
+        float leaf_a = base_a + offset;
+        Projectile* proj = AllocProjectile(game);
+        if (!proj) break;
+        proj->type = PROJ_RAZOR_LEAF;
+        proj->color = (SDL_Color){ 200, 60, 255, 255 }; // Acid purple/magenta
+        proj->pos = p->pos;
+        proj->vel.x = cosf(leaf_a) * slot->proj_speed;
+        proj->vel.y = sinf(leaf_a) * slot->proj_speed;
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = 99;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 1.3f;
+        proj->is_enemy = false;
+    }
+}
+
+void Weapons_FireSlot(GameState* game, ActiveWeaponSlot* slot) {
+    switch (slot->type) {
+        case WEAPON_VINE_WHIP:       Weapons_FireVineWhip(game, slot); break;
+        case WEAPON_FLAMETHROWER:    Weapons_FireFlamethrower(game, slot); break;
+        case WEAPON_BUBBLE_BEAM:     Weapons_FireBubbleBeam(game, slot); break;
+        case WEAPON_RAZOR_LEAF:      Weapons_FireRazorLeaf(game, slot); break;
+        case WEAPON_SWIFT:           Weapons_FireSwift(game, slot); break;
+        case WEAPON_THUNDER_SHOCK:   Weapons_FireThunderShock(game, slot); break;
+        case WEAPON_TOXIC_SPORE:     Weapons_FireToxicSpore(game, slot); break;
+        case WEAPON_SOLAR_FRENZY:    Weapons_FireSolarFrenzy(game, slot); break;
+        case WEAPON_FIRE_BLAST:      Weapons_FireFireBlast(game, slot); break;
+        case WEAPON_HYDRO_VORTEX:    Weapons_FireHydroVortex(game, slot); break;
+        case WEAPON_PLASMA_TEMPEST:  Weapons_FirePlasmaTempest(game, slot); break;
+        case WEAPON_VENOM_CATACLYSM: Weapons_FireVenomCataclysm(game, slot); break;
+        default: break;
+    }
+}
+
+// Legacy wrappers
+void Weapons_FireWaterWand(GameState* game) {
+    if (game->player.weapon_count > 0) Weapons_FireSlot(game, &game->player.weapons[0]);
+}
+void Weapons_FireCleave(GameState* game) {
+    if (game->player.weapon_count > 0) Weapons_FireSlot(game, &game->player.weapons[0]);
+}
+void Weapons_FirePulse(GameState* game) {
+    if (game->player.weapon_count > 0) Weapons_FireSlot(game, &game->player.weapons[0]);
 }
 
 void Weapons_Update(GameState* game, float dt) {
-    // 1. Water Wand / Ember / Razor Leaf
-    if (game->weapons.water_wand.enabled) {
-        game->weapons.water_wand.cooldown_timer -= dt;
-        if (game->weapons.water_wand.cooldown_timer <= 0.0f) {
-            Weapons_FireWaterWand(game);
-            game->weapons.water_wand.cooldown_timer = game->weapons.water_wand.cooldown;
+    Player* player = &game->player;
+
+    // 0. Update aim direction for player
+    if (game->mouse_active) {
+        float mdx = game->mouse_pos.x - player->pos.x;
+        float mdy = game->mouse_pos.y - player->pos.y;
+        float mlen = sqrtf(mdx * mdx + mdy * mdy);
+        if (mlen > 5.0f) {
+            player->aim_dir = (Vec2){ mdx / mlen, mdy / mlen };
         }
-    }
-    
-    // 2. Cleave / Vine Whip / Dragon Breath
-    if (game->weapons.cleave.enabled) {
-        game->weapons.cleave.cooldown_timer -= dt;
-        if (game->weapons.cleave.cooldown_timer <= 0.0f) {
-            if (game->player.starter == STARTER_BULBASAUR) {
-                Weapons_FireVineWhip(game);
-            } else {
-                Weapons_FireCleave(game);
+    } else {
+        // Auto-aim at closest enemy within 500px, or default to facing direction
+        float best_d2 = 500.0f * 500.0f;
+        int best_e = -1;
+        for (int k = 0; k < game->active_enemy_count; k++) {
+            int e_idx = game->active_enemy_indices[k];
+            Enemy* e = &game->enemies[e_idx];
+            if (!e->active || e->is_underground) continue;
+            float dx = e->pos.x - player->pos.x;
+            float dy = e->pos.y - player->pos.y;
+            float d2 = dx * dx + dy * dy;
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best_e = e_idx;
             }
-            game->weapons.cleave.cooldown_timer = game->weapons.cleave.cooldown;
         }
-    }
-
-    // 3. Radial Pulse / Toxic Spore / Bubble Beam
-    if (game->weapons.pulse.enabled) {
-        game->weapons.pulse.cooldown_timer -= dt;
-        if (game->weapons.pulse.cooldown_timer <= 0.0f) {
-            Weapons_FirePulse(game);
-            game->weapons.pulse.cooldown_timer = game->weapons.pulse.cooldown;
-        }
-    }
-    
-    // 4. Update Orbiters / Petal Dance
-    static float orbiter_global_angle = 0.0f;
-    if (game->weapons.orbiters.enabled) {
-        WeaponConfig* orb = &game->weapons.orbiters;
-        bool is_bulbasaur = (game->player.starter == STARTER_BULBASAUR);
-
-        if (is_bulbasaur) {
-            orb->orbiter_cycle_timer += dt;
-            float total_cycle = orb->orbiter_active_duration + orb->orbiter_cooldown_duration;
-            if (total_cycle <= 0.001f) total_cycle = 6.0f;
-            if (orb->orbiter_cycle_timer >= total_cycle) {
-                orb->orbiter_cycle_timer -= total_cycle;
-            }
-
-            float t = orb->orbiter_cycle_timer;
-            if (t < orb->orbiter_active_duration) {
-                // Active bloom phase
-                orbiter_global_angle += (orb->orbiter_speed * 1.35f) * dt;
-                if (t < 0.65f) {
-                    // Extend out from player
-                    float prog = t / 0.65f;
-                    orb->orbiter_current_radius = 16.0f + (orb->orbiter_radius - 16.0f) * prog;
-                    orb->orbiter_alpha = prog;
-                } else if (t > orb->orbiter_active_duration - 0.65f) {
-                    // Dissipate outwards and fade
-                    float prog = (t - (orb->orbiter_active_duration - 0.65f)) / 0.65f;
-                    orb->orbiter_current_radius = orb->orbiter_radius + 45.0f * prog;
-                    orb->orbiter_alpha = 1.0f - prog;
-                } else {
-                    // Full spin
-                    orb->orbiter_current_radius = orb->orbiter_radius;
-                    orb->orbiter_alpha = 1.0f;
-                }
-            } else {
-                // Cooldown / dissipated
-                orb->orbiter_current_radius = 0.0f;
-                orb->orbiter_alpha = 0.0f;
+        if (best_e >= 0) {
+            float dx = game->enemies[best_e].pos.x - player->pos.x;
+            float dy = game->enemies[best_e].pos.y - player->pos.y;
+            float dlen = sqrtf(dx * dx + dy * dy);
+            if (dlen > 0.001f) {
+                player->aim_dir = (Vec2){ dx / dlen, dy / dlen };
             }
         } else {
-            orb->orbiter_current_radius = orb->orbiter_radius;
-            orb->orbiter_alpha = 1.0f;
-            orbiter_global_angle += orb->orbiter_speed * dt;
-        }
-
-        if (orbiter_global_angle > 2.0f * (float)M_PI) {
-            orbiter_global_angle -= 2.0f * (float)M_PI;
+            Vec2 fdir = { 1.0f, 0.0f };
+            switch (player->anim.direction) {
+                case 0: fdir = (Vec2){ 0.0f, 1.0f }; break;
+                case 1: fdir = (Vec2){ 0.707f, 0.707f }; break;
+                case 2: fdir = (Vec2){ 1.0f, 0.0f }; break;
+                case 3: fdir = (Vec2){ 0.707f, -0.707f }; break;
+                case 4: fdir = (Vec2){ 0.0f, -1.0f }; break;
+                case 5: fdir = (Vec2){ -0.707f, -0.707f }; break;
+                case 6: fdir = (Vec2){ -1.0f, 0.0f }; break;
+                case 7: fdir = (Vec2){ -0.707f, 0.707f }; break;
+            }
+            player->aim_dir = fdir;
         }
     }
-    
-    int orb_count = (game->weapons.orbiters.enabled && game->weapons.orbiters.orbiter_alpha > 0.01f) ? game->weapons.orbiters.orbiter_count : 0;
+
+    // 1. Update and fire all active weapons
+    for (int i = 0; i < player->weapon_count; i++) {
+        ActiveWeaponSlot* slot = &player->weapons[i];
+        if (slot->type == WEAPON_NONE) continue;
+        if (slot->type == WEAPON_FIRE_SPIN || slot->type == WEAPON_AQUA_ORBS) continue; // continuous shields
+
+        slot->cooldown_timer -= dt;
+        if (slot->cooldown_timer <= 0.0f) {
+            Weapons_FireSlot(game, slot);
+            slot->cooldown_timer = slot->cooldown;
+        }
+    }
+
+    // 2. Update Orbiters (Petal Dance, Fire Spin, Aqua Orbs, Solar Frenzy, Hydro Vortex)
+    static float orbiter_global_angle = 0.0f;
+    orbiter_global_angle += 2.6f * dt;
+    if (orbiter_global_angle > 2.0f * (float)M_PI) {
+        orbiter_global_angle -= 2.0f * (float)M_PI;
+    }
+
+    ActiveWeaponSlot* orb_slot = NULL;
+    for (int i = 0; i < player->weapon_count; i++) {
+        WeaponType wt = player->weapons[i].type;
+        if (wt == WEAPON_PETAL_DANCE || wt == WEAPON_FIRE_SPIN || wt == WEAPON_AQUA_ORBS ||
+            wt == WEAPON_SOLAR_FRENZY || wt == WEAPON_HYDRO_VORTEX) {
+            orb_slot = &player->weapons[i];
+            break;
+        }
+    }
+
+    int orb_count = 0;
+    float cur_rad = 110.0f;
+    float orb_dmg = 16.0f;
+    SDL_Color orb_col = (SDL_Color){ 255, 120, 190, 255 };
+
+    if (orb_slot) {
+        if (orb_slot->type == WEAPON_PETAL_DANCE) {
+            orb_slot->state_timer += dt;
+            float total_cycle = 3.6f + 2.8f;
+            if (orb_slot->state_timer >= total_cycle) orb_slot->state_timer -= total_cycle;
+            float t = orb_slot->state_timer;
+            if (t < 3.6f) {
+                orb_count = orb_slot->count;
+                orb_dmg = orb_slot->damage;
+                if (t < 0.65f) cur_rad = 16.0f + (orb_slot->range - 16.0f) * (t / 0.65f);
+                else if (t > 3.6f - 0.65f) cur_rad = orb_slot->range + 45.0f * ((t - (3.6f - 0.65f)) / 0.65f);
+                else cur_rad = orb_slot->range;
+                orb_col = (SDL_Color){ 255, 120, 190, 255 };
+            }
+        } else if (orb_slot->type == WEAPON_FIRE_SPIN) {
+            orb_count = orb_slot->count;
+            orb_dmg = orb_slot->damage;
+            cur_rad = 80.0f;
+            orb_col = (SDL_Color){ 255, 90, 20, 255 };
+        } else if (orb_slot->type == WEAPON_AQUA_ORBS) {
+            orb_count = orb_slot->count;
+            orb_dmg = orb_slot->damage;
+            cur_rad = 100.0f;
+            orb_col = (SDL_Color){ 60, 160, 255, 255 };
+        } else if (orb_slot->type == WEAPON_SOLAR_FRENZY) {
+            orb_count = 8;
+            orb_dmg = 32.0f;
+            cur_rad = 125.0f;
+            orb_col = (SDL_Color){ 255, 220, 90, 255 };
+        } else if (orb_slot->type == WEAPON_HYDRO_VORTEX) {
+            orb_count = 6;
+            orb_dmg = 34.0f;
+            cur_rad = 110.0f;
+            orb_col = (SDL_Color){ 40, 220, 255, 255 };
+        }
+    }
+
     int current_active_orbs = 0;
     for (int i = 0; i < MAX_PROJECTILES; i++) {
         if (game->projectiles[i].active && game->projectiles[i].type == PROJ_ORBITER) {
             if (current_active_orbs < orb_count) {
                 float angle = orbiter_global_angle + ((2.0f * (float)M_PI * current_active_orbs) / orb_count);
-                game->projectiles[i].pos.x = game->player.pos.x + cosf(angle) * game->weapons.orbiters.orbiter_current_radius;
-                game->projectiles[i].pos.y = game->player.pos.y + sinf(angle) * game->weapons.orbiters.orbiter_current_radius;
-                game->projectiles[i].radius = game->weapons.orbiters.proj_radius;
-                game->projectiles[i].damage = game->weapons.orbiters.damage * game->player.damage_mult * game->weapons.orbiters.orbiter_alpha;
-                game->projectiles[i].knockback = game->weapons.orbiters.knockback;
+                game->projectiles[i].pos.x = player->pos.x + cosf(angle) * cur_rad;
+                game->projectiles[i].pos.y = player->pos.y + sinf(angle) * cur_rad;
+                game->projectiles[i].radius = 15.0f;
+                game->projectiles[i].damage = orb_dmg * player->damage_mult;
+                game->projectiles[i].knockback = (orb_slot ? orb_slot->knockback : 100.0f);
                 game->projectiles[i].orbit_angle = angle;
-                if (game->player.starter == STARTER_BULBASAUR) {
-                    game->projectiles[i].color = (SDL_Color){ 255, 120, 190, (Uint8)(game->weapons.orbiters.orbiter_alpha * 255.0f) };
-                } else if (game->player.starter == STARTER_CHARMANDER) {
-                    game->projectiles[i].color = (SDL_Color){ 255, 90, 20, 255 };  // Fire Spin orange
-                } else {
-                    game->projectiles[i].color = (SDL_Color){ 60, 150, 255, 255 }; // Aqua Orbs cyan
-                }
+                game->projectiles[i].color = orb_col;
                 current_active_orbs++;
             } else {
                 game->projectiles[i].active = false;
@@ -549,41 +1003,36 @@ void Weapons_Update(GameState* game, float dt) {
         }
     }
     while (current_active_orbs < orb_count) {
-        Projectile* p = AllocProjectile(game);
-        if (!p) break;
-        p->type = PROJ_ORBITER;
-        p->active = true;
-        p->pierce_left = 999;
-        p->max_lifetime = 9999.0f;
-        p->lifetime = 0.0f;
-        p->is_enemy = false;
+        Projectile* pr = AllocProjectile(game);
+        if (!pr) break;
+        pr->type = PROJ_ORBITER;
+        pr->active = true;
+        pr->pierce_left = 999;
+        pr->max_lifetime = 9999.0f;
+        pr->lifetime = 0.0f;
+        pr->is_enemy = false;
         float angle = orbiter_global_angle + ((2.0f * (float)M_PI * current_active_orbs) / orb_count);
-        p->pos.x = game->player.pos.x + cosf(angle) * game->weapons.orbiters.orbiter_current_radius;
-        p->pos.y = game->player.pos.y + sinf(angle) * game->weapons.orbiters.orbiter_current_radius;
-        p->radius = game->weapons.orbiters.proj_radius;
-        p->damage = game->weapons.orbiters.damage * game->player.damage_mult * game->weapons.orbiters.orbiter_alpha;
-        p->knockback = game->weapons.orbiters.knockback;
-        p->orbit_angle = angle;
-        if (game->player.starter == STARTER_BULBASAUR) {
-            p->color = (SDL_Color){ 255, 120, 190, (Uint8)(game->weapons.orbiters.orbiter_alpha * 255.0f) };
-        } else if (game->player.starter == STARTER_CHARMANDER) {
-            p->color = (SDL_Color){ 255, 90, 20, 255 };
-        } else {
-            p->color = (SDL_Color){ 60, 150, 255, 255 };
-        }
+        pr->pos.x = player->pos.x + cosf(angle) * cur_rad;
+        pr->pos.y = player->pos.y + sinf(angle) * cur_rad;
+        pr->radius = 15.0f;
+        pr->damage = orb_dmg * player->damage_mult;
+        pr->knockback = (orb_slot ? orb_slot->knockback : 100.0f);
+        pr->orbit_angle = angle;
+        pr->color = orb_col;
         current_active_orbs++;
     }
 
     // 5. Update All Projectiles
-    Player* player = &game->player;
     for (int i = 0; i < MAX_PROJECTILES; i++) {
         Projectile* p = &game->projectiles[i];
         if (!p->active) continue;
         
         p->lifetime += dt;
         if (p->lifetime >= p->max_lifetime || p->pierce_left <= 0) {
-            if (p->type == PROJ_EMBER) {
-                Weapons_SpawnGroundHazard(game, HAZARD_FIRE_SCORCH, p->pos, 28.0f, 1.4f, 14.0f * player->damage_mult, false, (SDL_Color){ 255, 120, 20, 255 });
+            if (p->type == PROJ_EMBER && (rand() % 100) < 30) {
+                Weapons_SpawnGroundHazard(game, HAZARD_FIRE_SCORCH, p->pos, 24.0f, 1.2f, 4.5f * player->damage_mult, false, (SDL_Color){ 255, 120, 20, 255 });
+            } else if (p->type == PROJ_FIRE_BLAST) {
+                Weapons_SpawnGroundHazard(game, HAZARD_LAVA_POOL, p->pos, 85.0f, 3.2f, 18.0f * player->damage_mult, false, (SDL_Color){ 255, 60, 20, 255 });
             }
             p->active = false;
             continue;
@@ -609,7 +1058,42 @@ void Weapons_Update(GameState* game, float dt) {
             }
         } else {
             // Player projectiles movement
-            if (p->type == PROJ_WATER_BOLT || p->type == PROJ_EMBER || p->type == PROJ_RAZOR_LEAF) {
+            if (p->type == PROJ_WATER_BOLT || p->type == PROJ_EMBER || p->type == PROJ_RAZOR_LEAF || p->type == PROJ_FIRE_BLAST) {
+                p->pos.x += p->vel.x * dt;
+                p->pos.y += p->vel.y * dt;
+            } else if (p->type == PROJ_SWIFT_STAR) {
+                // Homing star: find nearest enemy and adjust velocity towards it!
+                float best_d2 = 450.0f * 450.0f;
+                Vec2 best_dir = p->vel;
+                bool found = false;
+                for (int k = 0; k < game->active_enemy_count; k++) {
+                    int e_idx = game->active_enemy_indices[k];
+                    Enemy* e = &game->enemies[e_idx];
+                    if (!e->active || e->is_underground) continue;
+                    float dx = e->pos.x - p->pos.x;
+                    float dy = e->pos.y - p->pos.y;
+                    float d2 = dx * dx + dy * dy;
+                    if (d2 < best_d2) {
+                        best_d2 = d2;
+                        float d = sqrtf(d2);
+                        if (d > 0.001f) {
+                            best_dir = (Vec2){ dx / d, dy / d };
+                            found = true;
+                        }
+                    }
+                }
+                float spd = sqrtf(p->vel.x * p->vel.x + p->vel.y * p->vel.y);
+                if (spd < 100.0f) spd = 280.0f;
+                if (found) {
+                    float turn_rate = 6.5f * dt;
+                    p->vel.x += (best_dir.x * spd - p->vel.x) * turn_rate;
+                    p->vel.y += (best_dir.y * spd - p->vel.y) * turn_rate;
+                    float cur_len = sqrtf(p->vel.x * p->vel.x + p->vel.y * p->vel.y);
+                    if (cur_len > 0.001f) {
+                        p->vel.x = (p->vel.x / cur_len) * spd;
+                        p->vel.y = (p->vel.y / cur_len) * spd;
+                    }
+                }
                 p->pos.x += p->vel.x * dt;
                 p->pos.y += p->vel.y * dt;
             } else if (p->type == PROJ_BUBBLE) {
@@ -617,7 +1101,7 @@ void Weapons_Update(GameState* game, float dt) {
                 p->pos.x += p->vel.x * dt;
                 p->pos.y += p->vel.y * dt + sinf(p->lifetime * 7.5f) * 1.6f;
             } else if (p->type == PROJ_PULSE_RING) {
-                p->radius += game->weapons.pulse.proj_speed * dt;
+                p->radius += 160.0f * dt;
             }
         }
     }
@@ -662,10 +1146,11 @@ void Weapons_Update(GameState* game, float dt) {
                 float hit_r = 34.0f + e->radius; // Generous 34px lash width!
 
                 if (dist_sq <= hit_r * hit_r) {
-                    // Critical whip snap at the tip (t >= 0.70 deals 1.30x critical crack!)
-                    float dmg_mult = (t >= 0.70f) ? 1.30f : 1.0f;
+                    // Critical whip snap at the tip (t >= 0.70 deals 1.25x critical crack!)
+                    float dmg_mult = (t >= 0.70f) ? 1.25f : 1.0f;
                     float dmg = vs->damage * dmg_mult;
                     if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_STATIONARY) dmg *= 0.35f;
+                    if (game->enemy_types[e->type].is_boss) dmg *= 0.65f;
                     e->hp -= dmg;
                     e->flash_timer = 0.14f;
                     float resist = game->enemy_types[e->type].knockback_resist;
@@ -960,6 +1445,36 @@ void Weapons_DrawGroundHazards(GameState* game) {
                                                  hx + (int)(cosf(a2)*cr), hy + (int)(sinf(a2)*cr));
                 }
             }
+        } else if (gh->type == HAZARD_LAVA_POOL) {
+            // Molten lava pool (Fire Blast Nova)
+            if (s_glow_texture) {
+                int lr = (int)(hr * 1.5f);
+                SDL_Rect halo = { hx - lr, hy - lr, lr * 2, lr * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 255, 60, 10);
+                SDL_SetTextureAlphaMod(s_glow_texture, (Uint8)(alpha * 200.0f));
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+
+                int ir = (int)(hr * 0.75f);
+                SDL_Rect inner = { hx - ir, hy - ir, ir * 2, ir * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 255, 230, 40);
+                SDL_SetTextureAlphaMod(s_glow_texture, (Uint8)(alpha * 240.0f));
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &inner);
+            }
+        } else if (gh->type == HAZARD_ACID_MIRE) {
+            // Corrosive bubbling acid mire (Venom Cataclysm)
+            if (s_glow_texture) {
+                int mr = (int)(hr * 1.4f);
+                SDL_Rect halo = { hx - mr, hy - mr, mr * 2, mr * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 180, 40, 240);
+                SDL_SetTextureAlphaMod(s_glow_texture, (Uint8)(alpha * 180.0f));
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+
+                int ir = (int)(hr * 0.70f);
+                SDL_Rect inner = { hx - ir, hy - ir, ir * 2, ir * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 80, 240, 120);
+                SDL_SetTextureAlphaMod(s_glow_texture, (Uint8)(alpha * 220.0f));
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &inner);
+            }
         }
     }
 }
@@ -1239,6 +1754,78 @@ void Weapons_Draw(GameState* game) {
                 SDL_SetRenderDrawColor(renderer, p->color.r, p->color.g, p->color.b, 220);
                 SDL_Rect orb = { sx - r, sy - r, r * 2, r * 2 };
                 SDL_RenderFillRect(renderer, &orb);
+            }
+        } else if (p->type == PROJ_SWIFT_STAR) {
+            // Glowing golden 5-point star
+            float spin = p->lifetime * 8.0f;
+            SDL_Point star_pts[11];
+            for (int pt = 0; pt < 10; pt++) {
+                float a = spin + (float)pt * ((float)M_PI / 5.0f);
+                float cur_r = (pt % 2 == 0) ? (float)r : (float)r * 0.45f;
+                star_pts[pt].x = sx + (int)(cosf(a) * cur_r);
+                star_pts[pt].y = sy + (int)(sinf(a) * cur_r);
+            }
+            star_pts[10] = star_pts[0];
+            if (s_glow_texture) {
+                int hr = (int)(r * 1.8f);
+                SDL_Rect halo = { sx - hr, sy - hr, hr * 2, hr * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 255, 230, 60);
+                SDL_SetTextureAlphaMod(s_glow_texture, 180);
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+            }
+            SDL_SetRenderDrawColor(renderer, 255, 245, 100, 255);
+            SDL_RenderDrawLines(renderer, star_pts, 11);
+            if (s_orb_texture) {
+                int cr = r / 2;
+                if (cr < 2) cr = 2;
+                SDL_Rect core = { sx - cr, sy - cr, cr * 2, cr * 2 };
+                SDL_SetTextureColorMod(s_orb_texture, 255, 255, 255);
+                SDL_SetTextureAlphaMod(s_orb_texture, 255);
+                SDL_RenderCopy(renderer, s_orb_texture, NULL, &core);
+            }
+        } else if (p->type == PROJ_LIGHTNING_BOLT) {
+            // Vertical jagged lightning strike
+            int bolt_top_y = sy - 160;
+            int segs = 6;
+            int cur_x = sx;
+            int cur_y = bolt_top_y;
+            SDL_SetRenderDrawColor(renderer, 180, 240, 255, 255);
+            for (int s = 0; s < segs; s++) {
+                int next_y = bolt_top_y + (160 * (s + 1)) / segs;
+                int next_x = sx + ((rand() % 24) - 12);
+                if (s == segs - 1) next_x = sx;
+                SDL_RenderDrawLine(renderer, cur_x - 1, cur_y, next_x - 1, next_y);
+                SDL_RenderDrawLine(renderer, cur_x, cur_y, next_x, next_y);
+                SDL_RenderDrawLine(renderer, cur_x + 1, cur_y, next_x + 1, next_y);
+                cur_x = next_x;
+                cur_y = next_y;
+            }
+            if (s_glow_texture) {
+                int hr = 36;
+                SDL_Rect halo = { sx - hr, sy - hr, hr * 2, hr * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 120, 220, 255);
+                SDL_SetTextureAlphaMod(s_glow_texture, 230);
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+            }
+        } else if (p->type == PROJ_FIRE_BLAST) {
+            // Kanji "大" 5-pronged blazing fire starburst
+            float rot = p->lifetime * 4.0f;
+            int arm_len = (int)(r * 1.4f);
+            if (s_glow_texture) {
+                int hr = (int)(r * 2.2f);
+                SDL_Rect halo = { sx - hr, sy - hr, hr * 2, hr * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 255, 60, 20);
+                SDL_SetTextureAlphaMod(s_glow_texture, 210);
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+            }
+            for (int a = 0; a < 5; a++) {
+                float angle = rot + (float)a * ((2.0f * (float)M_PI) / 5.0f);
+                int ex = sx + (int)(cosf(angle) * arm_len);
+                int ey = sy + (int)(sinf(angle) * arm_len);
+                SDL_SetRenderDrawColor(renderer, 255, 140, 30, 255);
+                SDL_RenderDrawLine(renderer, sx - 1, sy, ex - 1, ey);
+                SDL_RenderDrawLine(renderer, sx, sy, ex, ey);
+                SDL_RenderDrawLine(renderer, sx + 1, sy, ex + 1, ey);
             }
         } else if (p->type == PROJ_SLASH) {
             // Thick, Sweeping Energy Crescent Blade (Vine Whip / Dragon Breath / Aqua Jet)
