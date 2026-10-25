@@ -1,0 +1,35 @@
+# Build Artifacts
+/rogue_game
+*.o
+*.d
+*.dSYM/
+
+# Operating System & Editor Files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Large Archives & Download Zips
+*.zip
+*.tar.gz
+*.tgz
+/assets/*.zip
+
+# Root sprites backup (superseded by assets/sprites)
+/sprites/
+
+# Ignore Gen 2-9 sprites (keep repo fast and within GitHub limits)
+/assets/sprites/portrait/*/
+/assets/sprites/sprite/*/
+
+# Whitelist Gen 1 Pokemon (0001 - 0151)
+!/assets/sprites/portrait/00[0-9][0-9]/
+!/assets/sprites/portrait/01[0-4][0-9]/
+!/assets/sprites/portrait/015[0-1]/
+!/assets/sprites/sprite/00[0-9][0-9]/
+!/assets/sprites/sprite/01[0-4][0-9]/
+!/assets/sprites/sprite/015[0-1]/
