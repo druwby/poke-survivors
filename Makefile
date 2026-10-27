@@ -13,7 +13,8 @@ SRCS = src/main.c \
        src/weapons.c \
        src/dev_menu.c \
        src/profiler.c \
-       src/font.c
+       src/font.c \
+       src/telemetry.c
 
 OBJS = $(SRCS:.c=.o)
 DEPS = $(SRCS:.c=.d)
@@ -30,9 +31,15 @@ $(TARGET): $(OBJS)
 -include $(DEPS)
 
 clean:
-	rm -f src/*.o src/*.d $(TARGET)
+	rm -f src/*.o src/*.d $(TARGET) test_suite
 
 run: $(TARGET)
 	./$(TARGET)
 
-.PHONY: all clean run
+test: test_suite
+	./test_suite
+
+test_suite: test_suite.c $(OBJS)
+	$(CC) $(CFLAGS) test_suite.c $(filter-out src/main.o, $(OBJS)) -o test_suite $(LDFLAGS)
+
+.PHONY: all clean run test

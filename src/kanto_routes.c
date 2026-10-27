@@ -3,6 +3,7 @@
 #include "pokedex.h"
 #include "sprite.h"
 #include "image_loader.h"
+#include "telemetry.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -132,7 +133,14 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
         cfg->pokedex_id = pid;
         strncpy(cfg->name, entry->name, sizeof(cfg->name) - 1);
         cfg->name[sizeof(cfg->name) - 1] = '\0';
-        cfg->max_hp = entry->base_hp;
+        
+        // Dynamic route scaling and stage defense
+        float route_hp_scale = (1.0f + (float)section_idx * 1.8f + (float)route_idx * 0.55f) * g_balance_config.route_hp_scaling;
+        cfg->max_hp = entry->base_hp * g_balance_config.enemy_hp_mult * route_hp_scale;
+        cfg->defense = g_balance_config.enemy_defense_base + (float)(entry->stage - 1) * g_balance_config.enemy_defense_per_stage;
+        if (cfg->defense < 0.0f) cfg->defense = 0.0f;
+        if (cfg->defense > 0.70f) cfg->defense = 0.70f;
+
         cfg->speed = entry->base_speed * 0.48f; // Paced movement speed (readable kiting)
         cfg->touch_damage = entry->touch_damage;
         cfg->radius = entry->radius;
@@ -171,7 +179,8 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
         if (pid == 50 || pid == 51) {
             char p[256];
             snprintf(p, sizeof(p), "assets/sprites/sprite/%04d/Swing-Anim.png", pid);
-            cfg->sprite_attack = Sprite_Load(game->renderer, p, 72, 72, 9, 8, 0.042f, cfg->sprite_scale);
+            int swing_h = (pid == 51) ? 80 : 72;
+            cfg->sprite_attack = Sprite_Load(game->renderer, p, 72, swing_h, 9, 8, 0.042f, cfg->sprite_scale);
             cfg->has_attack_sprite = cfg->sprite_attack.loaded;
         } else if (pid == 143) {
             cfg->sprite_attack = Sprite_Load(game->renderer, "assets/sprites/sprite/0143/Stomp-Anim.png", 80, 104, 14, 8, 0.040f, cfg->sprite_scale);
@@ -190,8 +199,9 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
             boss_cfg->pokedex_id = bpid;
             strncpy(boss_cfg->name, route->boss_name ? route->boss_name : b_entry->name, sizeof(boss_cfg->name) - 1);
             boss_cfg->name[sizeof(boss_cfg->name) - 1] = '\0';
-            float boss_hp_mult = 22.0f + (float)section_idx * 5.0f;
+            float boss_hp_mult = (22.0f + (float)section_idx * 5.0f) * g_balance_config.boss_hp_mult;
             boss_cfg->max_hp = b_entry->base_hp * boss_hp_mult;
+            boss_cfg->defense = 0.35f; // Thick armor for epic gym boss encounter
             boss_cfg->speed = b_entry->base_speed * 0.40f;
             boss_cfg->touch_damage = b_entry->touch_damage * 1.5f;
             boss_cfg->radius = b_entry->radius * 1.35f;
@@ -249,6 +259,12 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
         game->spawner.batch_size = 2;
         game->spawner.max_enemies = 35 + section_idx * 6; // Caps at 35-75 enemies
     }
+
+    // Apply global balance configuration multipliers
+    game->spawner.spawn_interval *= g_balance_config.spawn_interval_mult;
+    game->spawner.max_enemies = (int)((float)game->spawner.max_enemies * g_balance_config.max_enemies_mult);
+    if (game->spawner.max_enemies < 5) game->spawner.max_enemies = 5;
+    if (game->spawner.max_enemies > MAX_ENEMIES) game->spawner.max_enemies = MAX_ENEMIES;
 }
 
 void KantoRoutes_AdvanceRoute(GameState* game) {
@@ -307,6 +323,9 @@ void KantoRoutes_Update(GameState* game, float dt) {
                         b->pokedex_id = cfg->pokedex_id;
                         b->hp = cfg->max_hp;
                         b->max_hp = cfg->max_hp;
+                        b->defense = cfg->defense;
+                        b->uid = ++g_enemy_uid_counter;
+                        b->spawn_time = game->spawner.game_time;
                         b->radius = cfg->radius;
                         b->touch_damage = cfg->touch_damage;
                         // Spawn 400px above player
@@ -314,6 +333,7 @@ void KantoRoutes_Update(GameState* game, float dt) {
                         b->pos.y = game->player.pos.y - 400.0f;
                         b->ai_state = ENEMY_AI_CHASE;
                         Game_ActivateEnemy(game, e);
+                        Telemetry_LogSpawn(game->spawner.game_time, b->uid, b->pokedex_id, cfg->name, 3, b->max_hp, route->name, game->current_section);
                         game->gym_boss_spawned = true;
                         game->spawner.spawn_interval = 3.2f; // Rare minion reinforcements during boss fight
                         game->spawner.batch_size = 1;
@@ -389,8 +409,15 @@ void KantoRoutes_SpawnEnemies(GameState* game, float dt) {
         memset(e, 0, sizeof(Enemy));
         e->type = t_idx;
         e->pokedex_id = cfg->pokedex_id;
-        e->hp = cfg->max_hp;
-        e->max_hp = cfg->max_hp;
+
+        // Dynamic time-based tenacity scaling: (1 + alpha * (t / 60)^gamma)
+        float time_scale = 1.0f + g_balance_config.time_hp_alpha * powf(game->spawner.game_time / 60.0f, g_balance_config.time_hp_gamma);
+        e->max_hp = cfg->max_hp * time_scale;
+        e->hp = e->max_hp;
+        e->defense = cfg->defense;
+        e->uid = ++g_enemy_uid_counter;
+        e->spawn_time = game->spawner.game_time;
+
         e->radius = cfg->radius;
         e->touch_damage = cfg->touch_damage;
 
@@ -413,5 +440,10 @@ void KantoRoutes_SpawnEnemies(GameState* game, float dt) {
         e->attack_has_hit = false;
 
         Game_ActivateEnemy(game, free_idx);
+
+        const RouteConfig* cur_route = KantoRoutes_GetCurrentRoute(game);
+        Telemetry_LogSpawn(game->spawner.game_time, e->uid, e->pokedex_id, cfg->name,
+                           Pokedex_GetEntry(e->pokedex_id) ? Pokedex_GetEntry(e->pokedex_id)->stage : 1,
+                           e->max_hp, cur_route ? cur_route->name : "UNKNOWN", game->current_section);
     }
 }

@@ -1,5 +1,6 @@
 #include "weapons.h"
 #include "game.h"
+#include "sprite.h"
 #include "font.h"
 #include <math.h>
 #include <stdio.h>
@@ -210,28 +211,28 @@ static void Weapons_InitSlot(ActiveWeaponSlot* slot, WeaponType type, int level)
 
     switch (type) {
         case WEAPON_VINE_WHIP:
-            slot->cooldown = 0.95f - (float)(level - 1) * 0.04f;
-            slot->damage = 42.0f * lvl_m;
+            slot->cooldown = 1.05f - (float)(level - 1) * 0.04f;
+            slot->damage = 38.0f * lvl_m;
             slot->range = 150.0f + (float)(level - 1) * 10.0f;
             slot->knockback = 220.0f;
             slot->count = 1 + (level - 1) / 2; // 1 at Lv 1-2, 2 at Lv 3-4, 3 at Lv 5
             break;
             
         case WEAPON_FLAMETHROWER:
-            slot->cooldown = 0.15f;
-            slot->damage = 12.0f * lvl_m;
-            slot->proj_speed = 280.0f + (float)(level - 1) * 20.0f;
+            slot->cooldown = 0.20f;
+            slot->damage = 10.5f * lvl_m;
+            slot->proj_speed = 300.0f + (float)(level - 1) * 20.0f;
             slot->proj_radius = 15.0f + (float)(level - 1) * 2.0f;
             slot->pierce = 2 + (level - 1);
-            slot->knockback = 45.0f;
+            slot->knockback = 75.0f;
             break;
             
         case WEAPON_BUBBLE_BEAM:
-            slot->cooldown = 0.60f - (float)(level - 1) * 0.03f;
-            slot->damage = 20.0f * lvl_m;
-            slot->proj_speed = 145.0f;
+            slot->cooldown = 0.45f - (float)(level - 1) * 0.03f;
+            slot->damage = 25.0f * lvl_m;
+            slot->proj_speed = 250.0f;
             slot->proj_radius = 18.0f + (float)(level - 1) * 2.0f;
-            slot->count = 1 + (level - 1);
+            slot->count = 1 + (level - 1) / 2;
             slot->pierce = 1;
             slot->knockback = 50.0f;
             break;
@@ -275,7 +276,7 @@ static void Weapons_InitSlot(ActiveWeaponSlot* slot, WeaponType type, int level)
             
         case WEAPON_SWIFT:
             slot->cooldown = 0.90f - (float)(level - 1) * 0.05f;
-            slot->damage = 18.0f * lvl_m;
+            slot->damage = 13.0f * lvl_m;
             slot->proj_speed = 280.0f;
             slot->proj_radius = 11.0f;
             slot->pierce = 1;
@@ -462,15 +463,15 @@ void Weapons_InitForStarter(GameState* game, StarterID starter) {
     if (starter == STARTER_BULBASAUR) {
         Weapons_AddWeapon(game, WEAPON_VINE_WHIP);
         wm->cleave.enabled = true;
-        wm->cleave.damage = 42.0f;
+        wm->cleave.damage = 40.0f;
         wm->cleave.cooldown = 0.95f;
         wm->cleave.slash_range = 150.0f;
         wm->cleave.knockback = 220.0f;
     } else if (starter == STARTER_CHARMANDER) {
         Weapons_AddWeapon(game, WEAPON_FLAMETHROWER);
         wm->water_wand.enabled = true;
-        wm->water_wand.damage = 12.0f;
-        wm->water_wand.cooldown = 0.15f;
+        wm->water_wand.damage = 9.0f;
+        wm->water_wand.cooldown = 0.20f;
         wm->water_wand.proj_speed = 280.0f;
         wm->water_wand.proj_radius = 15.0f;
         wm->water_wand.pierce = 2;
@@ -478,9 +479,9 @@ void Weapons_InitForStarter(GameState* game, StarterID starter) {
     } else if (starter == STARTER_SQUIRTLE) {
         Weapons_AddWeapon(game, WEAPON_BUBBLE_BEAM);
         wm->water_wand.enabled = true;
-        wm->water_wand.damage = 20.0f;
-        wm->water_wand.cooldown = 0.60f;
-        wm->water_wand.proj_speed = 145.0f;
+        wm->water_wand.damage = 26.0f;
+        wm->water_wand.cooldown = 0.45f;
+        wm->water_wand.proj_speed = 220.0f;
         wm->water_wand.proj_radius = 18.0f;
         wm->water_wand.pierce = 1;
         wm->water_wand.knockback = 50.0f;
@@ -509,6 +510,7 @@ static Projectile* AllocProjectile(GameState* game) {
             game->projectiles[i].active = true;
             game->projectiles[i].is_enemy = false;
             game->projectiles[i].color = (SDL_Color){ 255, 255, 255, 255 };
+            game->projectiles[i].hit_uids_count = 0;
             return &game->projectiles[i];
         }
     }
@@ -532,6 +534,19 @@ void Weapons_SpawnEnemyProjectile(GameState* game, Vec2 pos, Vec2 vel, float rad
 }
 
 void Weapons_SpawnGroundHazard(GameState* game, HazardType type, Vec2 pos, float radius, float duration, float damage, bool is_enemy, SDL_Color color) {
+    // If an identical hazard already exists at this location, refresh its duration rather than stacking duplicate damage
+    for (int i = 0; i < MAX_GROUND_HAZARDS; i++) {
+        GroundHazard* gh = &game->ground_hazards[i];
+        if (gh->active && gh->type == type && gh->is_enemy == is_enemy) {
+            float dx = gh->pos.x - pos.x;
+            float dy = gh->pos.y - pos.y;
+            if (dx * dx + dy * dy < 25.0f * 25.0f) {
+                gh->timer = 0.0f; // Reset duration
+                gh->max_duration = duration;
+                return;
+            }
+        }
+    }
     for (int i = 0; i < MAX_GROUND_HAZARDS; i++) {
         if (!game->ground_hazards[i].active) {
             GroundHazard* gh = &game->ground_hazards[i];
@@ -652,7 +667,7 @@ void Weapons_FireFlamethrower(GameState* game, ActiveWeaponSlot* slot) {
         proj->pierce_left = slot->pierce;
         proj->knockback = slot->knockback;
         proj->lifetime = 0.0f;
-        proj->max_lifetime = 0.60f;
+        proj->max_lifetime = 0.70f;
         proj->is_enemy = false;
     }
 }
@@ -773,19 +788,16 @@ void Weapons_FireThunderShock(GameState* game, ActiveWeaponSlot* slot) {
             proj->pos = e->pos;
             proj->vel = (Vec2){ 0.0f, 0.0f };
             proj->radius = 28.0f;
-            proj->damage = slot->damage * p->damage_mult;
-            proj->pierce_left = 99;
+            proj->damage = 0.0f; // Visual effect; actual damage is applied below via Game_ApplyEnemyDamage
+            proj->pierce_left = 1;
             proj->knockback = slot->knockback;
             proj->lifetime = 0.0f;
             proj->max_lifetime = 0.22f;
             proj->is_enemy = false;
         }
 
-        float dmg = slot->damage * p->damage_mult;
-        if (game->enemy_types[e->type].is_boss) dmg *= 0.65f;
-        e->hp -= dmg;
-        e->flash_timer = 0.18f;
-        Weapons_SpawnDamageText(game, e->pos, dmg, (SDL_Color){ 255, 255, 80, 255 });
+        float actual_dmg = Game_ApplyEnemyDamage(game, e_idx, slot->damage * p->damage_mult, "THUNDERBOLT");
+        Weapons_SpawnDamageText(game, e->pos, actual_dmg, (SDL_Color){ 255, 255, 80, 255 });
     }
 }
 
@@ -1159,18 +1171,7 @@ void Weapons_Update(GameState* game, float dt) {
                 player->aim_dir = (Vec2){ dx / dlen, dy / dlen };
             }
         } else {
-            Vec2 fdir = { 1.0f, 0.0f };
-            switch (player->anim.direction) {
-                case 0: fdir = (Vec2){ 0.0f, 1.0f }; break;
-                case 1: fdir = (Vec2){ 0.707f, 0.707f }; break;
-                case 2: fdir = (Vec2){ 1.0f, 0.0f }; break;
-                case 3: fdir = (Vec2){ 0.707f, -0.707f }; break;
-                case 4: fdir = (Vec2){ 0.0f, -1.0f }; break;
-                case 5: fdir = (Vec2){ -0.707f, -0.707f }; break;
-                case 6: fdir = (Vec2){ -1.0f, 0.0f }; break;
-                case 7: fdir = (Vec2){ -0.707f, 0.707f }; break;
-            }
-            player->aim_dir = fdir;
+            player->aim_dir = Sprite_DirectionToVec(player->anim.direction);
         }
     }
 
@@ -1424,29 +1425,16 @@ void Weapons_Update(GameState* game, float dt) {
                     // Critical whip snap at the tip (t >= 0.70 deals 1.25x critical crack!)
                     float dmg_mult = (t >= 0.70f) ? 1.25f : 1.0f;
                     float dmg = vs->damage * dmg_mult;
-                    if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_STATIONARY) dmg *= 0.35f;
-                    if (game->enemy_types[e->type].is_boss) dmg *= 0.65f;
-                    e->hp -= dmg;
-                    e->flash_timer = 0.14f;
                     float resist = game->enemy_types[e->type].knockback_resist;
                     float kb = vs->knockback * (1.0f - resist * 0.4f) * (t >= 0.70f ? 1.25f : 1.0f);
                     e->knockback_x = vs->dir.x * kb;
                     e->knockback_y = vs->dir.y * kb;
                     SDL_Color dmg_col = (t >= 0.70f) ? (SDL_Color){ 255, 255, 120, 255 } : (SDL_Color){ 80, 245, 80, 255 };
-                    Weapons_SpawnDamageText(game, e->pos, dmg, dmg_col);
 
-                    if (e->hp <= 0.0f) {
-                        player->kills++;
-                        game->route_kills++;
-                        for (int g = 0; g < MAX_GEMS; g++) {
-                            if (!game->gems[g].active) {
-                                game->gems[g].active = true;
-                                game->gems[g].pos = e->pos;
-                                game->gems[g].value = game->enemy_types[e->type].xp_value;
-                                break;
-                            }
-                        }
-                        Game_DeactivateEnemy(game, e_idx);
+                    float actual_dmg = Game_ApplyEnemyDamage(game, e_idx, dmg, "VINE_WHIP");
+                    Weapons_SpawnDamageText(game, e->pos, actual_dmg, dmg_col);
+                    if (!e->active) {
+                        k--;
                     }
                 }
             }
@@ -1489,23 +1477,10 @@ void Weapons_Update(GameState* game, float dt) {
                     float dy = e->pos.y - gh->pos.y;
                     float r_tot = gh->radius + e->radius;
                     if (dx * dx + dy * dy <= r_tot * r_tot) {
-                        float dmg = gh->damage;
-                        if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_STATIONARY) dmg *= 0.35f;
-                        e->hp -= dmg;
-                        e->flash_timer = 0.08f;
-                        Weapons_SpawnDamageText(game, e->pos, dmg, (SDL_Color){ 255, 140, 30, 255 });
-                        if (e->hp <= 0.0f) {
-                            player->kills++;
-                            game->route_kills++;
-                            for (int g = 0; g < MAX_GEMS; g++) {
-                                if (!game->gems[g].active) {
-                                    game->gems[g].active = true;
-                                    game->gems[g].pos = e->pos;
-                                    game->gems[g].value = game->enemy_types[e->type].xp_value;
-                                    break;
-                                }
-                            }
-                            Game_DeactivateEnemy(game, e_idx);
+                        float actual_dmg = Game_ApplyEnemyDamage(game, e_idx, gh->damage, "FIRE_SCORCH");
+                        Weapons_SpawnDamageText(game, e->pos, actual_dmg, (SDL_Color){ 255, 140, 30, 255 });
+                        if (!e->active) {
+                            k--;
                         }
                     }
                 }
@@ -1531,25 +1506,12 @@ void Weapons_Update(GameState* game, float dt) {
                         float dy = e->pos.y - gh->pos.y;
                         float r_tot = gh->radius + e->radius;
                         if (dx * dx + dy * dy <= r_tot * r_tot) {
-                            float dmg = gh->damage;
-                            if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_STATIONARY) dmg *= 0.35f;
-                            e->hp -= dmg;
-                            e->flash_timer = 0.08f;
                             e->vel.x *= 0.50f;
                             e->vel.y *= 0.50f;
-                            Weapons_SpawnDamageText(game, e->pos, dmg, (SDL_Color){ 140, 230, 80, 255 });
-                            if (e->hp <= 0.0f) {
-                                player->kills++;
-                                game->route_kills++;
-                                for (int g = 0; g < MAX_GEMS; g++) {
-                                    if (!game->gems[g].active) {
-                                        game->gems[g].active = true;
-                                        game->gems[g].pos = e->pos;
-                                        game->gems[g].value = game->enemy_types[e->type].xp_value;
-                                        break;
-                                    }
-                                }
-                                Game_DeactivateEnemy(game, e_idx);
+                            float actual_dmg = Game_ApplyEnemyDamage(game, e_idx, gh->damage, "TOXIC_SPORE");
+                            Weapons_SpawnDamageText(game, e->pos, actual_dmg, (SDL_Color){ 140, 230, 80, 255 });
+                            if (!e->active) {
+                                k--;
                             }
                         }
                     }

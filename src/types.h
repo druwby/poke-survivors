@@ -72,6 +72,26 @@ typedef enum {
 } PlayerState;
 
 typedef enum {
+    BOT_OPTIMAL  = 0,
+    BOT_MEDIOCRE = 1,
+    BOT_BRUISER  = 2,
+    BOT_COWARD   = 3,
+} BotArchetype;
+
+typedef struct {
+    float enemy_hp_mult;           // Multiplier on enemy base HP (default ~1.35)
+    float route_hp_scaling;        // Route progression HP scaling multiplier (default ~1.0)
+    float time_hp_alpha;           // Dynamic time scaling coefficient (default ~0.15)
+    float time_hp_gamma;           // Dynamic time scaling exponent (default ~1.0)
+    float enemy_defense_base;      // Base enemy defense / damage reduction ratio (default ~0.10)
+    float enemy_defense_per_stage; // Extra defense per evolution stage (default ~0.08)
+    float weapon_damage_mult;      // Global player weapon damage multiplier (default ~1.0)
+    float spawn_interval_mult;     // Spawner rate multiplier (default ~1.0)
+    float max_enemies_mult;        // Max active enemy cap multiplier (default ~1.0)
+    float boss_hp_mult;            // Gym Leader / Boss HP multiplier (default ~1.0)
+} BalanceConfig;
+
+typedef enum {
     ENEMY_MOVE_SWARM       = 0, // Direct approach with soft separation (Rattata, Mankey, Caterpie, Weedle)
     ENEMY_MOVE_FLANK_ORBIT = 1, // Aerial circling and swoop-in attacks (Pidgey, Zubat, Butterfree, Fearow)
     ENEMY_MOVE_CHARGER     = 2, // Windup telegraph laser, then 3.5x speed straight rush (Tauros, Rhyhorn, Beedrill, Machop)
@@ -274,6 +294,7 @@ typedef struct {
     int pokedex_id;
     char name[32];
     float max_hp;
+    float defense;          // Damage reduction ratio (0.0 to 0.70)
     float speed;
     float touch_damage;
     float radius;
@@ -300,17 +321,23 @@ typedef struct {
 
 typedef struct {
     bool active;
+    uint32_t uid;         // Monotonic unique entity ID for telemetry tracking
     int type; // index into game->enemy_types
     int pokedex_id;
     Vec2 pos;
     Vec2 vel;
     float hp;
     float max_hp;
+    float defense;        // Dynamic damage reduction ratio
+    float spawn_time;     // Sim timestamp when entity was spawned
+    bool was_hit;         // True once entity has taken combat damage
+    float first_hit_time; // Sim timestamp of first damage taken
     float radius;
     float touch_damage;
     float knockback_x;
     float knockback_y;
     float flash_timer;    // white hit flash
+    float orbiter_hit_cooldown; // Cooldown between taking damage from persistent orbiters
     AnimState anim;       // walk/burrow animation state
     
     // Attack & AI State
@@ -409,6 +436,8 @@ typedef struct {
     float orbit_dist;
     bool is_enemy;        // true if fired by an enemy (damages player)
     SDL_Color color;      // visual tint/color
+    uint32_t hit_uids[8]; // Unique enemy IDs already struck by this projectile
+    uint8_t hit_uids_count;
 } Projectile;
 
 typedef struct {
@@ -606,6 +635,22 @@ typedef struct {
     // Starter selection portraits
     SDL_Texture* starter_portraits[3]; // Bulbasaur (0), Charmander (1), Squirtle (2)
     SpriteSheet starter_sprites[3];
+
+    // High-precision big data telemetry & balance tracking
+    float total_damage_dealt;
+    float total_overkill_damage;
+    float danger_time_sec;
+    float prev_player_hp;
+    float hp_volatility_accum;
+    int hp_samples_count;
+    int instant_kills;
+    int kills_stage1;
+    int kills_stage2;
+    int kills_stage3;
+    float sum_ttk_stage1;
+    float sum_ttk_stage2;
+    float sum_ttk_stage3;
+    float telemetry_timer;
 } GameState;
 
 #endif // TYPES_H

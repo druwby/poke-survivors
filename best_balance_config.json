@@ -1,0 +1,12 @@
+{
+  "enemy_hp_mult": 1.38,
+  "route_hp_scaling": 1.00,
+  "time_hp_alpha": 0.08,
+  "time_hp_gamma": 1.00,
+  "enemy_defense_base": 0.07,
+  "enemy_defense_per_stage": 0.05,
+  "weapon_damage_mult": 1.00,
+  "spawn_interval_mult": 1.00,
+  "max_enemies_mult": 1.00,
+  "boss_hp_mult": 1.00
+}

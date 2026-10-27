@@ -29,6 +29,23 @@ typedef struct {
     float gym_boss_fight_duration;
     float player_hp_at_boss_start;
     float player_hp_at_boss_end;
+
+    // Big Data & Machine Learning Balance Metrics
+    BotArchetype archetype;
+    const char* archetype_name;
+    float avg_ttk_stage1;
+    float avg_ttk_stage2;
+    float avg_ttk_stage3;
+    float avg_ttk_boss;
+    int kills_stage1;
+    int kills_stage2;
+    int kills_stage3;
+    int instant_kills;          // Enemies killed in < 1.0s (combat pacing red flag)
+    float total_overkill_damage;// Wasted damage exceeding enemy max HP
+    float overkill_ratio;       // overkill / (damage_dealt + overkill)
+    float danger_time_sec;      // Time spent under 40% HP (tension index)
+    float danger_time_pct;
+    float hp_volatility;        // Delta HP volatility index
     
     // Balance issue diagnosis flags
     bool flag_died_early;            // Died before Route 2
@@ -40,6 +57,8 @@ typedef struct {
 typedef struct {
     StarterID starter;
     const char* starter_name;
+    BotArchetype archetype;
+    const char* archetype_name;
     int trials;
     float max_sim_time_sec;
     
@@ -82,6 +101,15 @@ typedef struct {
     float avg_dashes;
     float avg_special_q;
     float avg_caught;
+
+    // Big Data Aggregates
+    float avg_ttk_stage1;
+    float avg_ttk_stage2;
+    float avg_ttk_boss;
+    float avg_overkill_ratio;
+    float avg_danger_time_pct;
+    float avg_hp_volatility;
+    int total_instant_kills;
     
     // Diagnostic alert counters
     int early_deaths;
@@ -91,12 +119,15 @@ typedef struct {
 
 // Run an automated balance simulation for a specific starter with a specific random seed
 SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, float max_sim_time_sec, unsigned int seed);
+SimRunResult BalanceSim_RunEx(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, float max_sim_time_sec, unsigned int seed, BotArchetype archetype);
 
 // Run multiple automated trials for a specific starter and calculate aggregate statistics
 StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, int num_trials, float max_sim_time_sec);
+StarterAggregateStats BalanceSim_RunStarterTrialsEx(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, int num_trials, float max_sim_time_sec, BotArchetype archetype);
 
 // Run full test suite comparing all 3 starters across N trials and print comprehensive statistical balance report
 void BalanceSim_RunTrials(SDL_Window* window, SDL_Renderer* renderer, int num_trials, float max_sim_time_sec);
+void BalanceSim_RunTrialsEx(SDL_Window* window, SDL_Renderer* renderer, int num_trials, float max_sim_time_sec, BotArchetype archetype, StarterID filter_starter, bool json_output);
 
 // Run full test suite comparing all 3 starters (defaults to 10 trials)
 void BalanceSim_RunAllStarters(SDL_Window* window, SDL_Renderer* renderer);

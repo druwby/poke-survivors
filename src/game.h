@@ -12,6 +12,7 @@ void Game_Draw(GameState* game);
 void Game_Cleanup(GameState* game);
 void Game_ActivateEnemy(GameState* game, int e_idx);
 void Game_DeactivateEnemy(GameState* game, int e_idx);
+float Game_ApplyEnemyDamage(GameState* game, int enemy_idx, float raw_dmg, const char* source_name);
 void Game_SelectStarter(GameState* game, StarterID starter);
 void Game_GenerateLevelUpCards(GameState* game);
 void Game_ApplyLevelUpChoice(GameState* game, int card_index);

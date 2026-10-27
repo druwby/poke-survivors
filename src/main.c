@@ -8,18 +8,28 @@
 #include "dev_menu.h"
 #include "balance_sim.h"
 #include "pokedex.h"
+#include "telemetry.h"
 
 int main(int argc, char* argv[]) {
+    BalanceConfig_InitDefaults();
+
     bool benchmark_mode = false;
     bool balance_test_mode = false;
-    int sim_trials = 10; // Default to 10 trials per starter for robust multi-trial statistical averaging
+    bool json_output = false;
+    bool force_headless = false;
+    int sim_trials = 10;
+    float sim_time_sec = 300.0f;
+    BotArchetype archetype = BOT_OPTIMAL;
+    StarterID filter_starter = STARTER_NONE;
+    const char* telemetry_export_path = NULL;
+
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--benchmark") == 0 || strcmp(argv[i], "-b") == 0) {
             benchmark_mode = true;
         } else if (strcmp(argv[i], "--balance-test") == 0 || strcmp(argv[i], "--simulate") == 0 || strcmp(argv[i], "-s") == 0) {
             balance_test_mode = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
-                int n = atoi(argv[i + 1]);
+                int n = atoi(argv[++i]);
                 if (n > 0) sim_trials = n;
             }
         } else if (strcmp(argv[i], "--trials") == 0 || strcmp(argv[i], "-n") == 0) {
@@ -27,7 +37,45 @@ int main(int argc, char* argv[]) {
                 int n = atoi(argv[++i]);
                 if (n > 0) sim_trials = n;
             }
+        } else if (strcmp(argv[i], "--sim-time") == 0) {
+            if (i + 1 < argc) {
+                float t = (float)atof(argv[++i]);
+                if (t > 0.0f) sim_time_sec = t;
+            }
+        } else if (strcmp(argv[i], "--bot-archetype") == 0 || strcmp(argv[i], "-a") == 0) {
+            if (i + 1 < argc) {
+                const char* arch_arg = argv[++i];
+                if (strcasecmp(arch_arg, "mediocre") == 0) archetype = BOT_MEDIOCRE;
+                else if (strcasecmp(arch_arg, "bruiser") == 0) archetype = BOT_BRUISER;
+                else if (strcasecmp(arch_arg, "coward") == 0) archetype = BOT_COWARD;
+                else archetype = BOT_OPTIMAL;
+            }
+        } else if (strcmp(argv[i], "--starter") == 0) {
+            if (i + 1 < argc) {
+                const char* st_arg = argv[++i];
+                if (strcasecmp(st_arg, "bulbasaur") == 0) filter_starter = STARTER_BULBASAUR;
+                else if (strcasecmp(st_arg, "charmander") == 0) filter_starter = STARTER_CHARMANDER;
+                else if (strcasecmp(st_arg, "squirtle") == 0) filter_starter = STARTER_SQUIRTLE;
+                else filter_starter = STARTER_NONE;
+            }
+        } else if (strcmp(argv[i], "--config-override") == 0 || strcmp(argv[i], "-c") == 0) {
+            if (i + 1 < argc) {
+                const char* cfg_path = argv[++i];
+                BalanceConfig_LoadFromFile(cfg_path);
+            }
+        } else if (strcmp(argv[i], "--export-telemetry") == 0 || strcmp(argv[i], "-e") == 0) {
+            if (i + 1 < argc) {
+                telemetry_export_path = argv[++i];
+            }
+        } else if (strcmp(argv[i], "--json-output") == 0) {
+            json_output = true;
+        } else if (strcmp(argv[i], "--headless") == 0) {
+            force_headless = true;
         }
+    }
+
+    if (telemetry_export_path) {
+        Telemetry_Init(telemetry_export_path);
     }
     
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_EVENTS) != 0) {
@@ -39,7 +87,7 @@ int main(int argc, char* argv[]) {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     
     Uint32 window_flags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE;
-    if (benchmark_mode || balance_test_mode) {
+    if (benchmark_mode || balance_test_mode || force_headless) {
         window_flags |= SDL_WINDOW_HIDDEN;
     } else {
         window_flags |= SDL_WINDOW_SHOWN;
@@ -61,7 +109,7 @@ int main(int argc, char* argv[]) {
     }
     
     Uint32 render_flags = SDL_RENDERER_ACCELERATED;
-    if (!benchmark_mode && !balance_test_mode) {
+    if (!benchmark_mode && !balance_test_mode && !force_headless) {
         render_flags |= SDL_RENDERER_PRESENTVSYNC;
     }
     
@@ -77,7 +125,8 @@ int main(int argc, char* argv[]) {
     SDL_RenderSetLogicalSize(renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
     
     if (balance_test_mode) {
-        BalanceSim_RunTrials(window, renderer, sim_trials, 300.0f);
+        BalanceSim_RunTrialsEx(window, renderer, sim_trials, sim_time_sec, archetype, filter_starter, json_output);
+        Telemetry_Close();
         Pokedex_Cleanup();
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);

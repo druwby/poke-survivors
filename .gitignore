@@ -1,8 +1,11 @@
 # Build Artifacts
 /rogue_game
+/test_suite
 *.o
 *.d
 *.dSYM/
+*.jsonl
+*.html
 
 # Operating System & Editor Files
 .DS_Store

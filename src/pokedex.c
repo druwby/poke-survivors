@@ -42,6 +42,21 @@ SpriteSheet Pokedex_LoadSprite(SDL_Renderer* renderer, int pokedex_id, float cus
     sheet.frame_duration = 0.12f;
     sheet.scale = (custom_scale > 0.0f) ? custom_scale : entry->scale;
     sheet.loaded = (sheet.texture != NULL);
+    if (sheet.loaded && sheet.texture) {
+        int tw = 0, th = 0;
+        if (SDL_QueryTexture(sheet.texture, NULL, NULL, &tw, &th) == 0 && tw > 0 && th > 0) {
+            if (sheet.num_frames > 0 && (sheet.frame_w <= 0 || (sheet.frame_w * sheet.num_frames != tw && tw % sheet.num_frames == 0))) {
+                sheet.frame_w = tw / sheet.num_frames;
+            } else if (sheet.num_frames <= 0 && sheet.frame_w > 0 && tw % sheet.frame_w == 0) {
+                sheet.num_frames = tw / sheet.frame_w;
+            }
+            if (sheet.num_directions > 0 && (sheet.frame_h <= 0 || (sheet.frame_h * sheet.num_directions != th && th % sheet.num_directions == 0))) {
+                sheet.frame_h = th / sheet.num_directions;
+            } else if (sheet.num_directions <= 0 && sheet.frame_h > 0 && th % sheet.frame_h == 0) {
+                sheet.num_directions = th / sheet.frame_h;
+            }
+        }
+    }
     return sheet;
 }
 

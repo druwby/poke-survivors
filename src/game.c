@@ -8,6 +8,7 @@
 #include "profiler.h"
 #include "font.h"
 #include "balance_sim.h"
+#include "telemetry.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -120,6 +121,7 @@ void Game_ActivateEnemy(GameState* game, int e_idx) {
     game->enemies[e_idx].active = true;
     game->enemies[e_idx].is_trapped = false;
     game->enemies[e_idx].trap_timer = 0.0f;
+    game->enemies[e_idx].orbiter_hit_cooldown = 0.0f;
     game->active_enemy_indices[game->active_enemy_count] = e_idx;
     game->enemy_index_in_active[e_idx] = game->active_enemy_count;
     game->active_enemy_count++;
@@ -153,6 +155,74 @@ static void SpawnGem(GameState* game, Vec2 pos, int value) {
             break;
         }
     }
+}
+
+float Game_ApplyEnemyDamage(GameState* game, int enemy_idx, float raw_dmg, const char* source_name) {
+    if (enemy_idx < 0 || enemy_idx >= MAX_ENEMIES) return 0.0f;
+    Enemy* e = &game->enemies[enemy_idx];
+    if (!e->active) return 0.0f;
+    if (raw_dmg <= 0.0f) return 0.0f;
+
+    // Track combat engagement timestamp (first hit)
+    if (!e->was_hit) {
+        e->was_hit = true;
+        e->first_hit_time = game->spawner.game_time;
+    }
+
+    float dmg = raw_dmg;
+    if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_STATIONARY) {
+        dmg *= 0.35f; // Harden: 65% damage reduction!
+    }
+    if (game->enemy_types[e->type].is_boss) {
+        dmg *= 0.65f; // Boss thick armor
+    }
+    // Dynamic enemy defense reduction
+    dmg *= (1.0f - e->defense);
+    if (dmg < 1.0f) dmg = 1.0f;
+
+    float old_hp = e->hp;
+    float overkill = (dmg > old_hp) ? (dmg - old_hp) : 0.0f;
+    e->hp -= dmg;
+    e->flash_timer = 0.12f;
+
+    game->total_damage_dealt += (dmg - overkill);
+    game->total_overkill_damage += overkill;
+
+    Telemetry_LogHit(game->spawner.game_time, e->uid, e->pokedex_id, dmg, (e->hp > 0.0f ? e->hp : 0.0f), source_name);
+
+    if (e->hp <= 0.0f) {
+        float combat_ttk = e->was_hit ? (game->spawner.game_time - e->first_hit_time) : 0.0f;
+        if (combat_ttk < 0.0f) combat_ttk = 0.0f;
+        float lifetime = game->spawner.game_time - e->spawn_time;
+        if (lifetime < 0.0f) lifetime = 0.0f;
+
+        const PokedexEntry* entry = Pokedex_GetEntry(e->pokedex_id);
+        int stage = entry ? entry->stage : 1;
+        if (stage == 1) {
+            game->kills_stage1++;
+            game->sum_ttk_stage1 += combat_ttk;
+        } else if (stage == 2) {
+            game->kills_stage2++;
+            game->sum_ttk_stage2 += combat_ttk;
+        } else {
+            game->kills_stage3++;
+            game->sum_ttk_stage3 += combat_ttk;
+        }
+        if (combat_ttk < 1.0f && !game->enemy_types[e->type].is_boss) {
+            game->instant_kills++;
+        }
+
+        const RouteConfig* route = KantoRoutes_GetCurrentRoute(game);
+        Telemetry_LogDeath(game->spawner.game_time, e->uid, e->pokedex_id,
+                           game->enemy_types[e->type].name, stage, combat_ttk, lifetime, overkill,
+                           source_name, route ? route->name : "UNKNOWN");
+
+        game->player.kills++;
+        game->route_kills++;
+        SpawnGem(game, e->pos, game->enemy_types[e->type].xp_value);
+        Game_DeactivateEnemy(game, enemy_idx);
+    }
+    return dmg;
 }
 
 bool Party_HasType(const GameState* game, PokeType type) {
@@ -488,44 +558,63 @@ void Party_Update(GameState* game, float dt) {
             m->pos.y += m->vel.y * dt;
         }
 
-        // Animation update
+        // Animation and facing direction update
         float move_spd = sqrtf(m->vel.x * m->vel.x + m->vel.y * m->vel.y);
         m->anim.is_moving = (move_spd > 15.0f);
-        if (m->anim.is_moving) {
-            m->anim.anim_timer += dt;
-            if (m->anim.anim_timer >= 0.12f) {
-                m->anim.anim_timer = 0.0f;
-                m->anim.current_frame = (m->anim.current_frame + 1) % 4;
-            }
-            if (fabsf(m->vel.x) > fabsf(m->vel.y)) {
-                m->anim.direction = (m->vel.x > 0) ? 2 : 1;
-            } else {
-                m->anim.direction = (m->vel.y > 0) ? 0 : 3;
+
+        // Check for nearby hostile threats
+        float closest_dist = 280.0f;
+        Vec2 foe_dir = { 0.0f, 0.0f };
+        bool found_foe = false;
+        for (int k = 0; k < game->active_enemy_count; k++) {
+            int e_idx = game->active_enemy_indices[k];
+            Enemy* e = &game->enemies[e_idx];
+            if (!e->active || e->is_underground) continue;
+            float edx = e->pos.x - m->pos.x;
+            float edy = e->pos.y - m->pos.y;
+            float edist = sqrtf(edx * edx + edy * edy);
+            if (edist < closest_dist && edist > 0.001f) {
+                closest_dist = edist;
+                foe_dir = (Vec2){ edx / edist, edy / edist };
+                found_foe = true;
             }
         }
+
+        // Facing direction calculation:
+        // Priority 1: If recently attacked, keep facing towards target
+        bool is_attacking = (m->attack_timer > m->attack_cooldown - 0.30f);
+        if (is_attacking && found_foe) {
+            m->anim.direction = Sprite_VecToDirection(foe_dir.x, foe_dir.y, m->anim.direction);
+        } else if (m->anim.is_moving && (fabsf(m->vel.x) > 5.0f || fabsf(m->vel.y) > 5.0f)) {
+            // Priority 2: Moving companions face movement velocity
+            m->anim.direction = Sprite_VecToDirection(m->vel.x, m->vel.y, m->anim.direction);
+        } else if (found_foe) {
+            // Priority 3: Stationary companions face closest threat
+            m->anim.direction = Sprite_VecToDirection(foe_dir.x, foe_dir.y, m->anim.direction);
+        } else {
+            // Priority 4: Idle companions: face toward player if far, or match player facing in formation
+            float to_px = p->pos.x - m->pos.x;
+            float to_py = p->pos.y - m->pos.y;
+            float p_dist = sqrtf(to_px * to_px + to_py * to_py);
+            if (p_dist > 55.0f) {
+                m->anim.direction = Sprite_VecToDirection(to_px, to_py, m->anim.direction);
+            } else {
+                m->anim.direction = p->anim.direction;
+            }
+        }
+
+        // Ensure safe 0..7 direction
+        m->anim.direction = ((m->anim.direction % 8) + 8) % 8;
+
+        // Advance animation frame using Pokemon's actual sprite sheet
+        Sprite_UpdateAnim(&m->anim, &m->sprite, dt, m->anim.is_moving);
 
         // Autonomous companion basic attacks every ~2.5s
         m->attack_timer -= dt;
         if (m->attack_timer <= 0.0f) {
-            float closest_dist = 300.0f;
-            Vec2 foe_dir = { 0.0f, 0.0f };
-            bool found_foe = false;
-            for (int k = 0; k < game->active_enemy_count; k++) {
-                int e_idx = game->active_enemy_indices[k];
-                Enemy* e = &game->enemies[e_idx];
-                if (!e->active) continue;
-                float edx = e->pos.x - m->pos.x;
-                float edy = e->pos.y - m->pos.y;
-                float edist = sqrtf(edx * edx + edy * edy);
-                if (edist < closest_dist && edist > 0.001f) {
-                    closest_dist = edist;
-                    foe_dir = (Vec2){ edx / edist, edy / edist };
-                    found_foe = true;
-                }
-            }
-
             if (found_foe) {
                 m->attack_timer = m->attack_cooldown;
+                m->anim.direction = Sprite_VecToDirection(foe_dir.x, foe_dir.y, m->anim.direction);
                 ProjectileType ptype = PROJ_SWIFT_STAR;
                 SDL_Color pcol = { 255, 230, 80, 255 };
                 float pspd = 280.0f;
@@ -585,10 +674,46 @@ void Party_Draw(GameState* game) {
     SDL_Renderer* renderer = game->renderer;
     Vec2 camera = game->camera;
     float time_sec = game->spawner.game_time;
+    Player* p = &game->player;
 
     for (int i = 1; i < game->party_count; i++) {
         PartyMember* m = &game->party[i];
         if (!m->active) continue;
+
+        // Ensure companions calculate facing angle/direction based on movement velocity or towards nearby targets/player
+        if (m->anim.is_moving && (fabsf(m->vel.x) > 5.0f || fabsf(m->vel.y) > 5.0f)) {
+            m->anim.direction = Sprite_VecToDirection(m->vel.x, m->vel.y, m->anim.direction);
+        } else {
+            float closest_dist = 280.0f;
+            Vec2 foe_dir = { 0.0f, 0.0f };
+            bool found_foe = false;
+            for (int k = 0; k < game->active_enemy_count; k++) {
+                int e_idx = game->active_enemy_indices[k];
+                Enemy* e = &game->enemies[e_idx];
+                if (!e->active || e->is_underground) continue;
+                float edx = e->pos.x - m->pos.x;
+                float edy = e->pos.y - m->pos.y;
+                float edist = sqrtf(edx * edx + edy * edy);
+                if (edist < closest_dist && edist > 0.001f) {
+                    closest_dist = edist;
+                    foe_dir = (Vec2){ edx / edist, edy / edist };
+                    found_foe = true;
+                }
+            }
+            if (found_foe) {
+                m->anim.direction = Sprite_VecToDirection(foe_dir.x, foe_dir.y, m->anim.direction);
+            } else {
+                float to_px = p->pos.x - m->pos.x;
+                float to_py = p->pos.y - m->pos.y;
+                float p_dist = sqrtf(to_px * to_px + to_py * to_py);
+                if (p_dist > 55.0f) {
+                    m->anim.direction = Sprite_VecToDirection(to_px, to_py, m->anim.direction);
+                } else {
+                    m->anim.direction = p->anim.direction;
+                }
+            }
+        }
+        m->anim.direction = ((m->anim.direction % 8) + 8) % 8;
 
         int screen_x = (int)(m->pos.x - camera.x);
         int screen_y = (int)(m->pos.y - camera.y);
@@ -642,7 +767,7 @@ void Game_SelectStarter(GameState* game, StarterID starter) {
     p->invuln_timer = 0.0f;
     p->invuln_duration = 0.40f;
     p->damage_flash_timer = 0.0f;
-    p->damage_mult = 1.0f;
+    p->damage_mult = 1.0f * g_balance_config.weapon_damage_mult;
     p->god_mode = false;
     p->level = 1;
     p->xp = 0;
@@ -682,7 +807,7 @@ void Game_SelectStarter(GameState* game, StarterID starter) {
         p->radius = 16.0f;
         p->pickup_radius = 120.0f;
         p->sprite = Pokedex_LoadSprite(game->renderer, 1, 1.8f);
-        p->sprite_charge = Sprite_Load(game->renderer, "assets/sprites/sprite/0001/Charge-Anim.png", 32, 32, 10, 8, 0.035f, 1.8f);
+        p->sprite_charge = Sprite_Load(game->renderer, "assets/sprites/sprite/0001/Charge-Anim.png", 32, 40, 10, 8, 0.035f, 1.8f);
         p->sprite_special = Sprite_Load(game->renderer, "assets/sprites/sprite/0001/Attack-Anim.png", 64, 72, 11, 8, 0.045f, 1.8f);
     } else if (starter == STARTER_CHARMANDER) {
         p->speed = 145.0f;
@@ -692,7 +817,7 @@ void Game_SelectStarter(GameState* game, StarterID starter) {
         p->radius = 15.0f;
         p->pickup_radius = 120.0f;
         p->sprite = Pokedex_LoadSprite(game->renderer, 4, 1.8f);
-        p->sprite_charge = Sprite_Load(game->renderer, "assets/sprites/sprite/0004/Charge-Anim.png", 32, 32, 10, 8, 0.035f, 1.8f);
+        p->sprite_charge = Sprite_Load(game->renderer, "assets/sprites/sprite/0004/Charge-Anim.png", 32, 40, 10, 8, 0.035f, 1.8f);
         p->sprite_special = Sprite_Load(game->renderer, "assets/sprites/sprite/0004/Attack-Anim.png", 64, 64, 11, 8, 0.045f, 1.8f);
     } else { // STARTER_SQUIRTLE
         p->speed = 138.0f;
@@ -711,7 +836,21 @@ void Game_SelectStarter(GameState* game, StarterID starter) {
     for (int i = 0; i < MAX_GROUND_HAZARDS; i++) game->ground_hazards[i].active = false;
     for (int i = 0; i < MAX_VINE_STRIKES; i++) game->vine_strikes[i].active = false;
     for (int i = 0; i < MAX_GEMS; i++) game->gems[i].active = false;
-    for (int i = 0; i < MAX_PARTICLES; i++) game->damage_texts[i].active = false;
+    // Reset telemetry metrics
+    game->total_damage_dealt = 0.0f;
+    game->total_overkill_damage = 0.0f;
+    game->danger_time_sec = 0.0f;
+    game->prev_player_hp = p->hp;
+    game->hp_volatility_accum = 0.0f;
+    game->hp_samples_count = 0;
+    game->instant_kills = 0;
+    game->kills_stage1 = 0;
+    game->kills_stage2 = 0;
+    game->kills_stage3 = 0;
+    game->sum_ttk_stage1 = 0.0f;
+    game->sum_ttk_stage2 = 0.0f;
+    game->sum_ttk_stage3 = 0.0f;
+    game->telemetry_timer = 0.0f;
 
     // Poké Ball Inventory: Starts with 1 Poké Ball to make smart team-building decisions
     p->pokeball_count = 1;
@@ -907,7 +1046,9 @@ void Game_HandleInput(GameState* game, const Uint8* keystate, float dt) {
     if (is_moving) {
         vx = (vx / len) * p->speed;
         vy = (vy / len) * p->speed;
-        p->anim.direction = Sprite_VecToDirection(vx, vy, p->anim.direction);
+        if (p->state == PLAYER_STATE_NORMAL) {
+            p->anim.direction = Sprite_VecToDirection(vx, vy, p->anim.direction);
+        }
     }
     
     // Check Ability 1: DASH (SHIFT)
@@ -920,20 +1061,9 @@ void Game_HandleInput(GameState* game, const Uint8* keystate, float dt) {
             p->dash_dir.x = vx / p->speed;
             p->dash_dir.y = vy / p->speed;
         } else {
-            float angle = 0.0f;
-            switch (p->anim.direction) {
-                case 0: angle = (float)M_PI * 0.5f; break;  // Down
-                case 1: angle = (float)M_PI * 0.25f; break; // Down-Right
-                case 2: angle = 0.0f; break;                // Right
-                case 3: angle = -(float)M_PI * 0.25f; break;// Up-Right
-                case 4: angle = -(float)M_PI * 0.5f; break; // Up
-                case 5: angle = -(float)M_PI * 0.75f; break;// Up-Left
-                case 6: angle = (float)M_PI; break;         // Left
-                case 7: angle = (float)M_PI * 0.75f; break; // Down-Left
-            }
-            p->dash_dir.x = cosf(angle);
-            p->dash_dir.y = sinf(angle);
+            p->dash_dir = Sprite_DirectionToVec(p->anim.direction);
         }
+        p->anim.direction = Sprite_VecToDirection(p->dash_dir.x, p->dash_dir.y, p->anim.direction);
         p->anim.current_frame = 0;
         p->anim.anim_timer = 0.0f;
     }
@@ -978,9 +1108,8 @@ void Game_HandleInput(GameState* game, const Uint8* keystate, float dt) {
                 e->pos.y += dir_y * shove;
                 
                 float burst_dmg = (p->special_q_damage * p->damage_mult) * 0.35f;
-                e->hp -= burst_dmg;
-                e->flash_timer = 0.12f;
-                Weapons_SpawnDamageText(game, e->pos, burst_dmg, (SDL_Color){ 80, 240, 255, 255 });
+                float actual = Game_ApplyEnemyDamage(game, e_idx, burst_dmg, "SPECIAL_Q_BURST");
+                Weapons_SpawnDamageText(game, e->pos, actual, (SDL_Color){ 80, 240, 255, 255 });
             }
         }
     }
@@ -989,7 +1118,12 @@ void Game_HandleInput(GameState* game, const Uint8* keystate, float dt) {
         p->vel.x = p->dash_dir.x * p->dash_speed;
         p->vel.y = p->dash_dir.y * p->dash_speed;
         p->anim.direction = Sprite_VecToDirection(p->dash_dir.x, p->dash_dir.y, p->anim.direction);
-        Sprite_UpdateAnim(&p->anim, &p->sprite_charge, dt, true);
+        if (p->sprite_charge.num_frames > 0 && p->dash_duration > 0.0001f) {
+            float progress = 1.0f - (p->dash_timer / p->dash_duration);
+            if (progress < 0.0f) progress = 0.0f;
+            if (progress > 0.999f) progress = 0.999f;
+            p->anim.current_frame = (int)(progress * (float)p->sprite_charge.num_frames);
+        }
     } else if (p->state == PLAYER_STATE_HYDRO_PUMP || p->state == PLAYER_STATE_SOLAR_BEAM || p->state == PLAYER_STATE_FLAMETHROWER) {
         p->vel.x = vx * 0.40f;
         p->vel.y = vy * 0.40f;
@@ -1016,6 +1150,8 @@ void Game_Update(GameState* game, float dt) {
 
     if (game->app_state != APP_STATE_PLAYING) return;
     
+    game->spawner.game_time += dt;
+    
     // -------------------------------------------------------------
     // PHASE 1: ROUTE PROGRESSION & SPAWNING
     // -------------------------------------------------------------
@@ -1041,6 +1177,24 @@ void Game_Update(GameState* game, float dt) {
         if (p->hp > p->max_hp) p->hp = p->max_hp;
     }
     
+    // Track Big Data Player Telemetry: Danger time (< 40% HP) and HP volatility
+    if (p->hp > 0.0f) {
+        if (p->hp < p->max_hp * 0.40f) {
+            game->danger_time_sec += dt;
+        }
+        float dhp = fabsf(p->hp - game->prev_player_hp);
+        game->hp_volatility_accum += dhp;
+        game->hp_samples_count++;
+        game->prev_player_hp = p->hp;
+
+        game->telemetry_timer += dt;
+        if (game->telemetry_timer >= 5.0f) {
+            game->telemetry_timer = 0.0f;
+            float d_pct = (game->danger_time_sec / (game->spawner.game_time > 0.001f ? game->spawner.game_time : 1.0f)) * 100.0f;
+            Telemetry_LogPlayerStat(game->spawner.game_time, p->hp, p->max_hp, d_pct, p->level, p->kills, "player");
+        }
+    }
+    
     if (p->invuln_timer > 0.0f) p->invuln_timer -= dt;
     if (p->damage_flash_timer > 0.0f) p->damage_flash_timer -= dt;
     if (p->dash_cooldown_timer > 0.0f) p->dash_cooldown_timer -= dt;
@@ -1050,6 +1204,16 @@ void Game_Update(GameState* game, float dt) {
         p->dash_timer -= dt;
         if (p->dash_timer <= 0.0f) {
             p->state = PLAYER_STATE_NORMAL;
+            p->anim.current_frame = 0;
+            p->anim.anim_timer = 0.0f;
+        } else {
+            p->anim.direction = Sprite_VecToDirection(p->dash_dir.x, p->dash_dir.y, p->anim.direction);
+            if (p->sprite_charge.num_frames > 0 && p->dash_duration > 0.0001f) {
+                float progress = 1.0f - (p->dash_timer / p->dash_duration);
+                if (progress < 0.0f) progress = 0.0f;
+                if (progress > 0.999f) progress = 0.999f;
+                p->anim.current_frame = (int)(progress * (float)p->sprite_charge.num_frames);
+            }
         }
     } else if (p->state == PLAYER_STATE_HYDRO_PUMP || p->state == PLAYER_STATE_SOLAR_BEAM || p->state == PLAYER_STATE_FLAMETHROWER) {
         p->special_q_timer -= dt;
@@ -1070,8 +1234,7 @@ void Game_Update(GameState* game, float dt) {
                 if (dist_sq <= p->special_q_range * p->special_q_range && dist_sq > 0.001f) {
                     float dist = sqrtf(dist_sq);
                     float dmg = (p->special_q_damage * p->damage_mult) * (0.07f / 0.5f);
-                    e->hp -= dmg;
-                    e->flash_timer = 0.08f;
+                    float actual = Game_ApplyEnemyDamage(game, e_idx, dmg, "SPECIAL_Q");
                     
                     float resist = game->enemy_types[e->type].knockback_resist;
                     float push = p->special_q_knockback * (1.0f - resist * 0.45f);
@@ -1088,13 +1251,9 @@ void Game_Update(GameState* game, float dt) {
                         e->pos.y += dir_y * pushout;
                     }
                     
-                    Weapons_SpawnDamageText(game, e->pos, dmg, (SDL_Color){ 0, 220, 255, 255 });
-                    
-                    if (e->hp <= 0.0f) {
-                        p->kills++;
-                        game->route_kills++;
-                        SpawnGem(game, e->pos, game->enemy_types[e->type].xp_value);
-                        Game_DeactivateEnemy(game, e_idx);
+                    Weapons_SpawnDamageText(game, e->pos, actual, (SDL_Color){ 0, 220, 255, 255 });
+                    if (!e->active) {
+                        k--;
                     }
                 }
             }
@@ -1141,10 +1300,7 @@ void Game_Update(GameState* game, float dt) {
             if (e->trap_timer >= e->trap_duration) {
                 e->is_trapped = false;
                 // Pop burst damage + radial splash (tuned for balanced combat pacing)
-                float pop_dmg = (24.0f + (float)p->move_basic_level * 6.0f) * p->damage_mult;
-                e->hp -= pop_dmg;
-                e->flash_timer = 0.15f;
-                Weapons_SpawnDamageText(game, e->pos, pop_dmg, (SDL_Color){ 90, 230, 255, 255 });
+                float pop_dmg = (16.0f + (float)p->move_basic_level * 4.0f) * p->damage_mult;
 
                 // Radial splash damage to nearby enemies
                 float splash_r = 75.0f;
@@ -1157,32 +1313,25 @@ void Game_Update(GameState* game, float dt) {
                     float sdy = se->pos.y - e->pos.y;
                     float sdist_sq = sdx * sdx + sdy * sdy;
                     if (sdist_sq <= splash_r * splash_r) {
-                        float splash_dmg = pop_dmg * 0.45f;
-                        se->hp -= splash_dmg;
-                        se->flash_timer = 0.10f;
                         float sdist = sqrtf(sdist_sq);
                         if (sdist > 0.001f) {
                             se->knockback_x += (sdx / sdist) * 160.0f;
                             se->knockback_y += (sdy / sdist) * 160.0f;
                         }
-                        Weapons_SpawnDamageText(game, se->pos, splash_dmg, (SDL_Color){ 120, 210, 255, 255 });
-                        if (se->hp <= 0.0f) {
-                            p->kills++;
-                            game->route_kills++;
-                            SpawnGem(game, se->pos, game->enemy_types[se->type].xp_value);
-                            int se_pos = game->enemy_index_in_active[se_idx];
-                            Game_DeactivateEnemy(game, se_idx);
+                        int prev_active = game->active_enemy_count;
+                        int se_pos = game->enemy_index_in_active[se_idx];
+                        float actual_splash = Game_ApplyEnemyDamage(game, se_idx, pop_dmg * 0.45f, "SCALD_BUBBLE_SPLASH");
+                        Weapons_SpawnDamageText(game, se->pos, actual_splash, (SDL_Color){ 120, 210, 255, 255 });
+                        if (game->active_enemy_count < prev_active) {
                             if (se_pos <= k) k--;
                             if (se_pos < sn) sn--;
                         }
                     }
                 }
 
-                if (e->hp <= 0.0f) {
-                    p->kills++;
-                    game->route_kills++;
-                    SpawnGem(game, e->pos, game->enemy_types[e->type].xp_value);
-                    Game_DeactivateEnemy(game, i);
+                float actual_pop = Game_ApplyEnemyDamage(game, i, pop_dmg, "SCALD_BUBBLE_POP");
+                Weapons_SpawnDamageText(game, e->pos, actual_pop, (SDL_Color){ 90, 230, 255, 255 });
+                if (!e->active) {
                     k--;
                     continue;
                 }
@@ -1196,6 +1345,7 @@ void Game_Update(GameState* game, float dt) {
             e->knockback_x -= e->knockback_x * decay;
             e->knockback_y -= e->knockback_y * decay;
             if (e->flash_timer > 0.0f) e->flash_timer -= dt;
+            if (e->orbiter_hit_cooldown > 0.0f) e->orbiter_hit_cooldown -= dt;
             continue;
         }
         
@@ -1472,6 +1622,7 @@ void Game_Update(GameState* game, float dt) {
         e->pos.y += e->vel.y * dt;
         
         if (e->flash_timer > 0.0f) e->flash_timer -= dt;
+        if (e->orbiter_hit_cooldown > 0.0f) e->orbiter_hit_cooldown -= dt;
     }
     
     game->profiler.t_enemies = Profiler_ElapsedMs(t_e_start);
@@ -1498,7 +1649,7 @@ void Game_Update(GameState* game, float dt) {
     
     for (int p_idx = 0; p_idx < MAX_PROJECTILES; p_idx++) {
         Projectile* proj = &game->projectiles[p_idx];
-        if (!proj->active || proj->is_enemy) continue; // Enemy bullets don't hurt enemies!
+        if (!proj->active || proj->is_enemy || (proj->damage <= 0.0f && proj->type != PROJ_POKEBALL)) continue; // Enemy bullets don't hurt enemies, and visual-only projectiles don't collide
         
         float search_rad = proj->radius + 32.0f;
         int found_count = Grid_QueryCircle(&g_grid, proj->pos.x, proj->pos.y, search_rad, query_buffer, 256);
@@ -1508,11 +1659,32 @@ void Game_Update(GameState* game, float dt) {
             Enemy* e = &game->enemies[e_idx];
             if (!e->active || e->is_underground) continue; // Untargetable underground!
             
+            if (proj->type == PROJ_ORBITER) {
+                if (e->orbiter_hit_cooldown > 0.0f) continue;
+            } else {
+                bool already_hit = false;
+                for (int h = 0; h < (int)proj->hit_uids_count; h++) {
+                    if (proj->hit_uids[h] == e->uid) {
+                        already_hit = true;
+                        break;
+                    }
+                }
+                if (already_hit) continue;
+            }
+
             float dx = e->pos.x - proj->pos.x;
             float dy = e->pos.y - proj->pos.y;
             float hit_dist = proj->radius + e->radius;
             
             if (dx * dx + dy * dy <= hit_dist * hit_dist) {
+                if (proj->type == PROJ_ORBITER) {
+                    e->orbiter_hit_cooldown = 0.35f;
+                } else {
+                    if (proj->hit_uids_count < 8) {
+                        proj->hit_uids[proj->hit_uids_count++] = e->uid;
+                    }
+                }
+
                 // SPECIAL PROJECTILE: POKÉ BALL CAPTURE MECHANIC
                 if (proj->type == PROJ_POKEBALL) {
                     if (game->enemy_types[e->type].is_boss) {
@@ -1548,7 +1720,10 @@ void Game_Update(GameState* game, float dt) {
                         m->vel = (Vec2){ 0.0f, 0.0f };
                         m->sprite_scale = entry->scale * 1.05f;
                         m->sprite = Pokedex_LoadSprite(game->renderer, pid, m->sprite_scale);
-                        m->anim = (AnimState){ 0, 0, 0.0f, false };
+                        float to_px = p->pos.x - m->pos.x;
+                        float to_py = p->pos.y - m->pos.y;
+                        int init_dir = Sprite_VecToDirection(to_px, to_py, 0);
+                        m->anim = (AnimState){ 0, init_dir, 0.0f, false };
                         m->attack_cooldown = 2.5f;
                         m->attack_timer = 0.8f;
                         m->follow_angle_offset = (slot == 1) ? 2.3f : -2.3f;
@@ -1567,27 +1742,34 @@ void Game_Update(GameState* game, float dt) {
                     break;
                 }
 
-                // Apply Damage
-                float dmg = proj->damage;
-                if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_STATIONARY) {
-                    dmg *= 0.35f; // Harden: 65% damage reduction!
+                // Apply Damage via centralized pipeline
+                const char* proj_src = "PROJECTILE";
+                if (proj->type == PROJ_WATER_BOLT) proj_src = "WATER_GUN";
+                else if (proj->type == PROJ_EMBER) proj_src = "EMBER";
+                else if (proj->type == PROJ_RAZOR_LEAF) proj_src = "RAZOR_LEAF";
+                else if (proj->type == PROJ_ORBITER) proj_src = "ORBITER";
+                else if (proj->type == PROJ_BUBBLE) proj_src = "BUBBLE";
+                else if (proj->type == PROJ_SWIFT_STAR) proj_src = "SWIFT_STAR";
+                else if (proj->type == PROJ_FIRE_BLAST) proj_src = "FIRE_BLAST";
+                else if (proj->type == PROJ_ROCK_SLIDE) proj_src = "ROCK_SLIDE";
+                else if (proj->type == PROJ_LIGHTNING_BOLT) proj_src = "LIGHTNING_BOLT";
+                else if (proj->type == PROJ_SCALD_BUBBLE) proj_src = "SCALD_BUBBLE";
+
+                float final_dmg = Game_ApplyEnemyDamage(game, e_idx, proj->damage, proj_src);
+                if (proj->type == PROJ_LIGHTNING_BOLT) {
+                    proj->damage = 0.0f; // Visual effect remains alive, but damage is dealt once
                 }
-                if (game->enemy_types[e->type].is_boss) {
-                    dmg *= 0.65f; // Boss thick armor: mitigates chip damage for longer, epic fights
-                }
-                e->hp -= dmg;
-                e->flash_timer = 0.10f;
                 
                 // Knockback
                 float d_len = sqrtf(dx * dx + dy * dy);
-                if (d_len > 0.001f) {
+                if (d_len > 0.001f && e->active) {
                     float resist = game->enemy_types[e->type].knockback_resist;
                     float push = proj->knockback * (1.0f - resist);
                     e->knockback_x += (dx / d_len) * push;
                     e->knockback_y += (dy / d_len) * push;
                 }
                 
-                Weapons_SpawnDamageText(game, e->pos, dmg, (SDL_Color){ 255, 255, 255, 255 });
+                Weapons_SpawnDamageText(game, e->pos, final_dmg, (SDL_Color){ 255, 255, 255, 255 });
                 
                 // If Ember strikes an enemy, only occasionally spawn fire scorch hazard
                 if (proj->type == PROJ_EMBER && (rand() % 100) < 25) {
@@ -1623,12 +1805,12 @@ void Game_Update(GameState* game, float dt) {
                                 float cdx = ne->pos.x - e->pos.x;
                                 float cdy = ne->pos.y - e->pos.y;
                                 if (cdx * cdx + cdy * cdy <= 140.0f * 140.0f) {
-                                    float cdmg = 45.0f * p->damage_mult;
-                                    if (game->enemy_types[ne->type].is_boss) cdmg *= 0.65f;
-                                    ne->hp -= cdmg;
-                                    ne->flash_timer = 0.15f;
-                                    Weapons_SpawnDamageText(game, ne->pos, cdmg, (SDL_Color){ 255, 255, 80, 255 });
+                                    float actual_cdmg = Game_ApplyEnemyDamage(game, ne_idx, 45.0f * p->damage_mult, "PLASMA_TEMPEST");
+                                    Weapons_SpawnDamageText(game, ne->pos, actual_cdmg, (SDL_Color){ 255, 255, 80, 255 });
                                     chains++;
+                                    if (!ne->active) {
+                                        nk--;
+                                    }
                                 }
                             }
                             break;
@@ -1654,7 +1836,7 @@ void Game_Update(GameState* game, float dt) {
                     if (!e->is_trapped) {
                         e->is_trapped = true;
                         e->trap_timer = 0.0f;
-                        e->trap_duration = 1.35f;
+                        e->trap_duration = 1.15f;
                         e->trap_drift_vel = (Vec2){ proj->vel.x * 0.15f, proj->vel.y * 0.15f - 24.0f };
                     }
                     for (int w = 0; w < p->weapon_count; w++) {
@@ -1668,11 +1850,12 @@ void Game_Update(GameState* game, float dt) {
                                     lp->pos = e->pos;
                                     lp->damage = 36.0f * p->damage_mult;
                                     lp->radius = 30.0f;
-                                    lp->pierce_left = 99;
+                                    lp->pierce_left = 3;
                                     lp->knockback = 120.0f;
                                     lp->lifetime = 0.0f;
                                     lp->max_lifetime = 0.35f;
                                     lp->is_enemy = false;
+                                    lp->hit_uids_count = 0;
                                     lp->color = (SDL_Color){ 255, 240, 80, 255 };
                                     break;
                                 }
@@ -1708,13 +1891,6 @@ void Game_Update(GameState* game, float dt) {
                 if (proj->pierce_left <= 0) {
                     proj->active = false;
                     break;
-                }
-                
-                if (e->hp <= 0.0f) {
-                    p->kills++;
-                    game->route_kills++;
-                    SpawnGem(game, e->pos, game->enemy_types[e->type].xp_value);
-                    Game_DeactivateEnemy(game, e_idx);
                 }
             }
         }
@@ -2096,17 +2272,7 @@ void Game_Draw(GameState* game) {
             if (e->ai_state == ENEMY_AI_ATTACKING) {
                 if (cfg->attack_type == ENEMY_ATTACK_BURROW_ASSASSIN) {
                     // Thick Diglett claw swipe arcs with white tip and red slash
-                    float s_ang = 0.0f;
-                    switch (e->attack_anim.direction) {
-                        case 0: s_ang = (float)M_PI * 0.5f; break;
-                        case 1: s_ang = (float)M_PI * 0.25f; break;
-                        case 2: s_ang = 0.0f; break;
-                        case 3: s_ang = -(float)M_PI * 0.25f; break;
-                        case 4: s_ang = -(float)M_PI * 0.5f; break;
-                        case 5: s_ang = -(float)M_PI * 0.75f; break;
-                        case 6: s_ang = (float)M_PI; break;
-                        case 7: s_ang = (float)M_PI * 0.75f; break;
-                    }
+                    float s_ang = Sprite_DirectionToAngle(e->attack_anim.direction);
                     for (int sa = -3; sa <= 3; sa++) {
                         float fa = s_ang + (float)sa * 0.18f;
                         int x1 = ex + (int)(cosf(fa) * 12.0f);
@@ -2243,17 +2409,7 @@ void Game_Draw(GameState* game) {
         // Solar Beam Continuous Light Laser
         float px = p->pos.x - camera.x;
         float py = p->pos.y - camera.y;
-        float ang = 0.0f;
-        switch (p->anim.direction) {
-            case 0: ang = (float)M_PI * 0.5f; break;
-            case 1: ang = (float)M_PI * 0.25f; break;
-            case 2: ang = 0.0f; break;
-            case 3: ang = -(float)M_PI * 0.25f; break;
-            case 4: ang = -(float)M_PI * 0.5f; break;
-            case 5: ang = -(float)M_PI * 0.75f; break;
-            case 6: ang = (float)M_PI; break;
-            case 7: ang = (float)M_PI * 0.75f; break;
-        }
+        float ang = Sprite_DirectionToAngle(p->anim.direction);
         float bx = px + cosf(ang) * p->special_q_range;
         float by = py + sinf(ang) * p->special_q_range;
         DrawFilledCircle(renderer, (int)px, (int)py, 22, (SDL_Color){ 255, 240, 100, 200 });
@@ -2266,17 +2422,7 @@ void Game_Draw(GameState* game) {
         // CHARMANDER ACTIVE [Q]: Iconic FIRE BLAST (大字爆 / Daimonji) Starburst!
         float px = p->pos.x - camera.x;
         float py = p->pos.y - camera.y;
-        float ang = 0.0f;
-        switch (p->anim.direction) {
-            case 0: ang = (float)M_PI * 0.5f; break;
-            case 1: ang = (float)M_PI * 0.25f; break;
-            case 2: ang = 0.0f; break;
-            case 3: ang = -(float)M_PI * 0.25f; break;
-            case 4: ang = -(float)M_PI * 0.5f; break;
-            case 5: ang = -(float)M_PI * 0.75f; break;
-            case 6: ang = (float)M_PI; break;
-            case 7: ang = (float)M_PI * 0.75f; break;
-        }
+        float ang = Sprite_DirectionToAngle(p->anim.direction);
 
         float progress = 1.0f - (p->special_q_timer / p->special_q_duration);
         float burst_r = p->special_q_range * (0.35f + progress * 0.75f);

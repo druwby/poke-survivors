@@ -18,16 +18,32 @@ SpriteSheet Sprite_Load(SDL_Renderer* renderer, const char* filepath, int frame_
     sheet.scale = scale;
     sheet.texture = Image_LoadTexture(renderer, filepath);
     sheet.loaded = (sheet.texture != NULL);
-    if (sheet.loaded && !g_headless_sim) {
-        printf("[Sprite] Loaded '%s' (%dx%d, %d frames, %d dirs, scale %.2f)\n", 
-               filepath, frame_w, frame_h, num_frames, num_directions, scale);
+    if (sheet.loaded && sheet.texture) {
+        int tw = 0, th = 0;
+        if (SDL_QueryTexture(sheet.texture, NULL, NULL, &tw, &th) == 0 && tw > 0 && th > 0) {
+            // Auto-correct or infer frame dimensions if caller specified 0 or mathematically mismatched dimensions
+            if (sheet.num_frames > 0 && (sheet.frame_w <= 0 || (sheet.frame_w * sheet.num_frames != tw && tw % sheet.num_frames == 0))) {
+                sheet.frame_w = tw / sheet.num_frames;
+            } else if (sheet.num_frames <= 0 && sheet.frame_w > 0 && tw % sheet.frame_w == 0) {
+                sheet.num_frames = tw / sheet.frame_w;
+            }
+            if (sheet.num_directions > 0 && (sheet.frame_h <= 0 || (sheet.frame_h * sheet.num_directions != th && th % sheet.num_directions == 0))) {
+                sheet.frame_h = th / sheet.num_directions;
+            } else if (sheet.num_directions <= 0 && sheet.frame_h > 0 && th % sheet.frame_h == 0) {
+                sheet.num_directions = th / sheet.frame_h;
+            }
+        }
+        if (!g_headless_sim) {
+            printf("[Sprite] Loaded '%s' (%dx%d, %d frames, %d dirs, scale %.2f)\n", 
+                   filepath, sheet.frame_w, sheet.frame_h, sheet.num_frames, sheet.num_directions, sheet.scale);
+        }
     }
     return sheet;
 }
 
 int Sprite_VecToDirection(float vx, float vy, int current_direction) {
-    if (fabsf(vx) < 0.01f && fabsf(vy) < 0.01f) {
-        return current_direction;
+    if (isnan(vx) || isnan(vy) || isinf(vx) || isinf(vy) || (fabsf(vx) < 0.01f && fabsf(vy) < 0.01f)) {
+        return ((current_direction % 8) + 8) % 8;
     }
     
     float angle = atan2f(vy, vx); // -PI to +PI
@@ -37,6 +53,7 @@ int Sprite_VecToDirection(float vx, float vy, int current_direction) {
     
     float deg = angle * (180.0f / (float)M_PI);
     int sector = (int)floorf((deg + 22.5f) / 45.0f) % 8;
+    if (sector < 0) sector = (sector + 8) % 8;
     
     // Sector map to PMD sprite row order:
     // 0: Right (0 deg)      -> Row 2
@@ -51,20 +68,52 @@ int Sprite_VecToDirection(float vx, float vy, int current_direction) {
     return sector_to_row[sector];
 }
 
+float Sprite_DirectionToAngle(int direction) {
+    int dir = ((direction % 8) + 8) % 8;
+    static const float dir_angles[8] = {
+        (float)M_PI * 0.5f,   // 0: Down (South, +Y)
+        (float)M_PI * 0.25f,  // 1: Down-Right (South-East, +X, +Y)
+        0.0f,                 // 2: Right (East, +X)
+        -(float)M_PI * 0.25f, // 3: Up-Right (North-East, +X, -Y)
+        -(float)M_PI * 0.5f,  // 4: Up (North, -Y)
+        -(float)M_PI * 0.75f, // 5: Up-Left (North-West, -X, -Y)
+        (float)M_PI,          // 6: Left (West, -X)
+        (float)M_PI * 0.75f   // 7: Down-Left (South-West, -X, +Y)
+    };
+    return dir_angles[dir];
+}
+
+Vec2 Sprite_DirectionToVec(int direction) {
+    float ang = Sprite_DirectionToAngle(direction);
+    return (Vec2){ cosf(ang), sinf(ang) };
+}
+
 void Sprite_UpdateAnim(AnimState* anim, const SpriteSheet* sheet, float dt, bool is_moving) {
+    if (!anim) return;
     anim->is_moving = is_moving;
-    if (!sheet || sheet->num_frames <= 1) return;
+    if (!sheet || sheet->num_frames <= 1) {
+        anim->current_frame = 0;
+        anim->anim_timer = 0.0f;
+        return;
+    }
     
     if (is_moving) {
         anim->anim_timer += dt;
-        if (anim->anim_timer >= sheet->frame_duration) {
-            anim->anim_timer -= sheet->frame_duration;
-            anim->current_frame = (anim->current_frame + 1) % sheet->num_frames;
+        if (sheet->frame_duration > 0.0001f) {
+            int frame_adv = (int)(anim->anim_timer / sheet->frame_duration);
+            if (frame_adv > 0) {
+                anim->anim_timer -= (float)frame_adv * sheet->frame_duration;
+                anim->current_frame = (anim->current_frame + frame_adv) % sheet->num_frames;
+            }
         }
     } else {
         // When stationary, keep facing direction but reset to idle frame (frame 0)
         anim->current_frame = 0;
         anim->anim_timer = 0.0f;
+    }
+
+    if (sheet->num_frames > 0) {
+        anim->current_frame = ((anim->current_frame % sheet->num_frames) + sheet->num_frames) % sheet->num_frames;
     }
 }
 
@@ -86,19 +135,7 @@ void Sprite_DrawProceduralFallback(SDL_Renderer* renderer, Vec2 pos, Vec2 camera
     }
     
     // Direction eye/pointer (bright white/yellow dot indicating facing)
-    float angle = 0.0f;
-    // Reverse row map to angle
-    switch (direction) {
-        case 0: angle = (float)M_PI * 0.5f; break;  // Down
-        case 1: angle = (float)M_PI * 0.25f; break; // Down-Right
-        case 2: angle = 0.0f; break;                // Right
-        case 3: angle = -(float)M_PI * 0.25f; break;// Up-Right
-        case 4: angle = -(float)M_PI * 0.5f; break; // Up
-        case 5: angle = -(float)M_PI * 0.75f; break;// Up-Left
-        case 6: angle = (float)M_PI; break;         // Left
-        case 7: angle = (float)M_PI * 0.75f; break; // Down-Left
-        default: break;
-    }
+    float angle = Sprite_DirectionToAngle(direction);
     
     int eye_x = screen_x + (int)(cosf(angle) * (radius * 0.6f));
     int eye_y = screen_y + (int)(sinf(angle) * (radius * 0.6f));
@@ -110,12 +147,18 @@ void Sprite_DrawProceduralFallback(SDL_Renderer* renderer, Vec2 pos, Vec2 camera
 
 void Sprite_Draw(SDL_Renderer* renderer, const SpriteSheet* sheet, const AnimState* anim, Vec2 pos, Vec2 camera, SDL_Color fallback_color, float fallback_radius, bool hit_flash) {
     if (!sheet || !sheet->loaded || !sheet->texture) {
-        Sprite_DrawProceduralFallback(renderer, pos, camera, fallback_radius, anim->direction, fallback_color, hit_flash);
+        Sprite_DrawProceduralFallback(renderer, pos, camera, fallback_radius, anim ? anim->direction : 0, fallback_color, hit_flash);
         return;
     }
     
-    int frame = anim->current_frame % sheet->num_frames;
-    int dir = anim->direction % sheet->num_directions;
+    int num_frames = sheet->num_frames > 0 ? sheet->num_frames : 1;
+    int num_directions = sheet->num_directions > 0 ? sheet->num_directions : 1;
+    
+    int cur_frame = anim ? anim->current_frame : 0;
+    int cur_dir = anim ? anim->direction : 0;
+    
+    int frame = ((cur_frame % num_frames) + num_frames) % num_frames;
+    int dir = ((cur_dir % num_directions) + num_directions) % num_directions;
     
     SDL_Rect src = {
         frame * sheet->frame_w,
@@ -136,21 +179,27 @@ void Sprite_Draw(SDL_Renderer* renderer, const SpriteSheet* sheet, const AnimSta
     
     if (hit_flash) {
         SDL_SetTextureColorMod(sheet->texture, 255, 100, 100);
-    } else {
+        SDL_RenderCopy(renderer, sheet->texture, &src, &dst);
         SDL_SetTextureColorMod(sheet->texture, 255, 255, 255);
+    } else {
+        SDL_RenderCopy(renderer, sheet->texture, &src, &dst);
     }
-    
-    SDL_RenderCopy(renderer, sheet->texture, &src, &dst);
 }
 
 void Sprite_DrawRotated(SDL_Renderer* renderer, const SpriteSheet* sheet, const AnimState* anim, Vec2 pos, Vec2 camera, double angle_deg, SDL_Color fallback_color, float fallback_radius, bool hit_flash) {
     if (!sheet || !sheet->loaded || !sheet->texture) {
-        Sprite_DrawProceduralFallback(renderer, pos, camera, fallback_radius, anim->direction, fallback_color, hit_flash);
+        Sprite_DrawProceduralFallback(renderer, pos, camera, fallback_radius, anim ? anim->direction : 0, fallback_color, hit_flash);
         return;
     }
     
-    int frame = anim->current_frame % sheet->num_frames;
-    int dir = anim->direction % sheet->num_directions;
+    int num_frames = sheet->num_frames > 0 ? sheet->num_frames : 1;
+    int num_directions = sheet->num_directions > 0 ? sheet->num_directions : 1;
+    
+    int cur_frame = anim ? anim->current_frame : 0;
+    int cur_dir = anim ? anim->direction : 0;
+    
+    int frame = ((cur_frame % num_frames) + num_frames) % num_frames;
+    int dir = ((cur_dir % num_directions) + num_directions) % num_directions;
     
     SDL_Rect src = {
         frame * sheet->frame_w,
@@ -171,9 +220,9 @@ void Sprite_DrawRotated(SDL_Renderer* renderer, const SpriteSheet* sheet, const 
     
     if (hit_flash) {
         SDL_SetTextureColorMod(sheet->texture, 255, 100, 100);
-    } else {
+        SDL_RenderCopyEx(renderer, sheet->texture, &src, &dst, angle_deg, NULL, SDL_FLIP_NONE);
         SDL_SetTextureColorMod(sheet->texture, 255, 255, 255);
+    } else {
+        SDL_RenderCopyEx(renderer, sheet->texture, &src, &dst, angle_deg, NULL, SDL_FLIP_NONE);
     }
-    
-    SDL_RenderCopyEx(renderer, sheet->texture, &src, &dst, angle_deg, NULL, SDL_FLIP_NONE);
 }

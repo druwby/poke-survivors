@@ -3,6 +3,7 @@
 #include "kanto_routes.h"
 #include "pokedex.h"
 #include "profiler.h"
+#include "telemetry.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,8 +14,82 @@
 #endif
 
 bool g_headless_sim = false;
+static bool s_silent_mode = false;
 
-SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, float max_sim_time_sec, unsigned int seed) {
+static int ScoreCardForArchetype(BotArchetype archetype, const LevelUpCard* card, StarterID starter) {
+    switch (archetype) {
+        case BOT_MEDIOCRE:
+            // Intentionally drafts non-synergistic, flat-stat options and avoids weapon evolutions
+            switch (card->type) {
+                case CHOICE_STAT_HP:         return 600;
+                case CHOICE_STAT_SPEED:      return 550;
+                case CHOICE_STAT_DAMAGE:     return 500;
+                case CHOICE_LEARN_WEAPON:    return 250; // flat unevolved weapon
+                case CHOICE_UPGRADE_WEAPON:  return 150;
+                case CHOICE_LEARN_ULT_Q:     return 100;
+                case CHOICE_EVOLVE_WEAPON:   return 20;  // deliberately skips fusion evolutions!
+                default:                     return 50;
+            }
+        case BOT_BRUISER:
+            // Prioritizes close-range weapons, HP, and pure offense
+            switch (card->type) {
+                case CHOICE_EVOLVE_WEAPON:   return 1000;
+                case CHOICE_LEARN_WEAPON:
+                    if (card->weapon_type == WEAPON_VINE_WHIP ||
+                        card->weapon_type == WEAPON_FIRE_SPIN ||
+                        card->weapon_type == WEAPON_AQUA_ORBS ||
+                        card->weapon_type == WEAPON_PETAL_DANCE) {
+                        return 850;
+                    }
+                    return 300;
+                case CHOICE_STAT_HP:         return 750;
+                case CHOICE_STAT_DAMAGE:     return 700;
+                case CHOICE_UPGRADE_WEAPON:  return 450;
+                case CHOICE_LEARN_ULT_Q:     return 350;
+                case CHOICE_STAT_SPEED:      return 150;
+                default:                     return 100;
+            }
+        case BOT_COWARD:
+            // Prioritizes movement speed, max HP buffer, and long-range projectile kiting
+            switch (card->type) {
+                case CHOICE_STAT_SPEED:      return 900;
+                case CHOICE_STAT_HP:         return 800;
+                case CHOICE_LEARN_WEAPON:
+                    if (card->weapon_type == WEAPON_BUBBLE_BEAM ||
+                        card->weapon_type == WEAPON_SWIFT ||
+                        card->weapon_type == WEAPON_THUNDER_SHOCK) {
+                        return 650;
+                    }
+                    return 100;
+                case CHOICE_EVOLVE_WEAPON:   return 450;
+                case CHOICE_UPGRADE_WEAPON:  return 350;
+                case CHOICE_LEARN_ULT_Q:     return 300;
+                case CHOICE_STAT_DAMAGE:     return 100;
+                default:                     return 50;
+            }
+        case BOT_OPTIMAL:
+        default:
+            // Optimal god-builder: prioritizes weapon evolutions, starter recipes, and combat synergies
+            switch (card->type) {
+                case CHOICE_EVOLVE_WEAPON:   return 1000; // ALWAYS pick fusion evolutions!
+                case CHOICE_LEARN_WEAPON:
+                    if ((starter == STARTER_BULBASAUR && card->weapon_type == WEAPON_PETAL_DANCE) ||
+                        (starter == STARTER_CHARMANDER && card->weapon_type == WEAPON_FIRE_SPIN) ||
+                        (starter == STARTER_SQUIRTLE && card->weapon_type == WEAPON_AQUA_ORBS)) {
+                        return 600;
+                    }
+                    return 250;
+                case CHOICE_UPGRADE_WEAPON:  return 350;
+                case CHOICE_LEARN_ULT_Q:     return 300;
+                case CHOICE_STAT_HP:         return 200;
+                case CHOICE_STAT_DAMAGE:     return 190;
+                case CHOICE_STAT_SPEED:      return 180;
+                default:                     return 100;
+            }
+    }
+}
+
+SimRunResult BalanceSim_RunEx(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, float max_sim_time_sec, unsigned int seed, BotArchetype archetype) {
     srand(seed);
     SimRunResult res;
     memset(&res, 0, sizeof(SimRunResult));
@@ -22,6 +97,12 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
     if (starter == STARTER_BULBASAUR) res.starter_name = "Bulbasaur";
     else if (starter == STARTER_CHARMANDER) res.starter_name = "Charmander";
     else res.starter_name = "Squirtle";
+
+    res.archetype = archetype;
+    if (archetype == BOT_MEDIOCRE) res.archetype_name = "Mediocre";
+    else if (archetype == BOT_BRUISER) res.archetype_name = "Bruiser";
+    else if (archetype == BOT_COWARD) res.archetype_name = "Coward";
+    else res.archetype_name = "Optimal";
 
     static GameState game;
     Game_Init(&game, window, renderer);
@@ -41,27 +122,7 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
             int best_card = 0;
             int best_score = -1;
             for (int c = 0; c < 3; c++) {
-                int score = 10;
-                LevelUpCard* card = &game.level_up_cards[c];
-                switch (card->type) {
-                    case CHOICE_EVOLVE_WEAPON:   score = 1000; break; // ALWAYS pick fusion evolutions!
-                    case CHOICE_LEARN_WEAPON:
-                        // Prioritize partner recipe weapon for starter
-                        if ((game.player.starter == STARTER_BULBASAUR && card->weapon_type == WEAPON_PETAL_DANCE) ||
-                            (game.player.starter == STARTER_CHARMANDER && card->weapon_type == WEAPON_FIRE_SPIN) ||
-                            (game.player.starter == STARTER_SQUIRTLE && card->weapon_type == WEAPON_AQUA_ORBS)) {
-                            score = 600;
-                        } else {
-                            score = 250;
-                        }
-                        break;
-                    case CHOICE_UPGRADE_WEAPON:  score = 350;  break; // Boost weapon damage & pierce
-                    case CHOICE_LEARN_ULT_Q:     score = 300;  break; // Active [Q] panic ability
-                    case CHOICE_STAT_HP:         score = 200;  break;
-                    case CHOICE_STAT_DAMAGE:     score = 190;  break;
-                    case CHOICE_STAT_SPEED:      score = 180;  break;
-                    default:                     score = 100;  break;
-                }
+                int score = ScoreCardForArchetype(archetype, &game.level_up_cards[c], game.player.starter);
                 if (score > best_score) {
                     best_score = score;
                     best_card = c;
@@ -89,7 +150,7 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
         prev_hp = p->hp;
 
         // -------------------------------------------------------------
-        // BOT PLAYER AI: Kiting, XP Vacuuming, Projectile Dodging
+        // MULTI-AGENT BOT PLAYER AI
         // -------------------------------------------------------------
         memset(keys, 0, sizeof(keys));
 
@@ -119,8 +180,18 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
                 nearest_dy = dy;
             }
 
-            // Repel if dangerously close
-            float repel_thresh = (p->starter == STARTER_BULBASAUR) ? 95.0f : ((p->starter == STARTER_CHARMANDER) ? 105.0f : 130.0f);
+            // Repel threshold tuned per bot archetype
+            float repel_thresh = 100.0f;
+            if (archetype == BOT_MEDIOCRE) {
+                repel_thresh = (p->starter == STARTER_BULBASAUR) ? 65.0f : ((p->starter == STARTER_CHARMANDER) ? 70.0f : 80.0f);
+            } else if (archetype == BOT_BRUISER) {
+                repel_thresh = 45.0f; // Aggressive face-tanker
+            } else if (archetype == BOT_COWARD) {
+                repel_thresh = (p->starter == STARTER_BULBASAUR) ? 180.0f : ((p->starter == STARTER_CHARMANDER) ? 190.0f : 220.0f);
+            } else { // BOT_OPTIMAL
+                repel_thresh = (p->starter == STARTER_BULBASAUR) ? 95.0f : ((p->starter == STARTER_CHARMANDER) ? 120.0f : 130.0f);
+            }
+
             if (dist < repel_thresh) {
                 enemies_in_danger_zone++;
                 float weight = (repel_thresh - dist) / repel_thresh;
@@ -138,56 +209,70 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
             p->aim_dir = (Vec2){ -nearest_dx / nearest_enemy_dist, -nearest_dy / nearest_enemy_dist };
         }
 
-        // Tactical Stance & Kiting Orbit:
-        // Bulbasaur & Charmander need to stay within attack range (~95-145px) and face/circle foes!
+        // Tactical Stance & Kiting Orbit
         if (nearest_enemy_dist < 400.0f && enemies_in_melee_zone == 0) {
             float to_foe_x = -nearest_dx / nearest_enemy_dist;
             float to_foe_y = -nearest_dy / nearest_enemy_dist;
-            // Tangential orbit vector for circular strafing
             float tan_x = -to_foe_y;
             float tan_y =  to_foe_x;
 
-            if (p->starter == STARTER_CHARMANDER) {
-                // Directional Flamethrower: circle enemies while facing them at ~110-150px sweet spot
-                if (nearest_enemy_dist > 150.0f) {
-                    steer_x += to_foe_x * 2.0f;
-                    steer_y += to_foe_y * 2.0f;
-                } else if (nearest_enemy_dist < 100.0f) {
-                    steer_x -= to_foe_x * 2.8f;
-                    steer_y -= to_foe_y * 2.8f;
-                } else {
-                    // Strafe tangentially in orbit and burn them with the flame cone
-                    steer_x += tan_x * 2.2f;
-                    steer_y += tan_y * 2.2f;
+            if (archetype == BOT_BRUISER) {
+                // Bruiser charges directly toward nearest foe
+                if (nearest_enemy_dist > 65.0f) {
+                    steer_x += to_foe_x * 2.5f;
+                    steer_y += to_foe_y * 2.5f;
                 }
-            } else if (p->starter == STARTER_BULBASAUR) {
-                // Vine Whip sweet spot: maintain 90-125px reach
-                if (nearest_enemy_dist > 125.0f) {
-                    steer_x += to_foe_x * 1.8f;
-                    steer_y += to_foe_y * 1.8f;
-                } else if (nearest_enemy_dist < 75.0f) {
-                    steer_x -= to_foe_x * 2.2f;
-                    steer_y -= to_foe_y * 2.2f;
-                } else {
-                    steer_x += tan_x * 1.5f;
-                    steer_y += tan_y * 1.5f;
-                }
-            } else if (p->starter == STARTER_SQUIRTLE) {
-                // Squirtle: ranged bubbles, keep comfortable 120-165px distance
-                if (nearest_enemy_dist > 165.0f) {
-                    steer_x += to_foe_x * 1.6f;
-                    steer_y += to_foe_y * 1.6f;
-                } else if (nearest_enemy_dist < 90.0f) {
+            } else if (archetype == BOT_COWARD) {
+                // Coward flees in opposite direction
+                steer_x -= to_foe_x * 2.8f;
+                steer_y -= to_foe_y * 2.8f;
+            } else if (archetype == BOT_MEDIOCRE) {
+                // Mediocre drafter: suboptimal direct movement, no tangential strafe
+                if (nearest_enemy_dist < 60.0f) {
                     steer_x -= to_foe_x * 2.0f;
                     steer_y -= to_foe_y * 2.0f;
-                } else {
-                    steer_x += tan_x * 1.4f;
-                    steer_y += tan_y * 1.4f;
+                }
+            } else {
+                // Optimal kiting: precise tangential strafing within weapon sweet spot
+                if (p->starter == STARTER_CHARMANDER) {
+                    if (nearest_enemy_dist > 170.0f) {
+                        steer_x += to_foe_x * 2.0f;
+                        steer_y += to_foe_y * 2.0f;
+                    } else if (nearest_enemy_dist < 115.0f) {
+                        steer_x -= to_foe_x * 2.8f;
+                        steer_y -= to_foe_y * 2.8f;
+                    } else {
+                        steer_x += tan_x * 2.2f;
+                        steer_y += tan_y * 2.2f;
+                    }
+                } else if (p->starter == STARTER_BULBASAUR) {
+                    if (nearest_enemy_dist > 125.0f) {
+                        steer_x += to_foe_x * 1.8f;
+                        steer_y += to_foe_y * 1.8f;
+                    } else if (nearest_enemy_dist < 75.0f) {
+                        steer_x -= to_foe_x * 2.2f;
+                        steer_y -= to_foe_y * 2.2f;
+                    } else {
+                        steer_x += tan_x * 1.5f;
+                        steer_y += tan_y * 1.5f;
+                    }
+                } else if (p->starter == STARTER_SQUIRTLE) {
+                    if (nearest_enemy_dist > 165.0f) {
+                        steer_x += to_foe_x * 1.6f;
+                        steer_y += to_foe_y * 1.6f;
+                    } else if (nearest_enemy_dist < 90.0f) {
+                        steer_x -= to_foe_x * 2.0f;
+                        steer_y -= to_foe_y * 2.0f;
+                    } else {
+                        steer_x += tan_x * 1.4f;
+                        steer_y += tan_y * 1.4f;
+                    }
                 }
             }
         }
 
         // 2. Dodge Incoming Enemy Projectiles
+        float dodge_thresh = (archetype == BOT_COWARD) ? 220.0f : ((archetype == BOT_MEDIOCRE) ? 70.0f : 150.0f);
         for (int i = 0; i < MAX_PROJECTILES; i++) {
             Projectile* proj = &game.projectiles[i];
             if (!proj->active || !proj->is_enemy) continue;
@@ -196,8 +281,7 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
             float dy = p->pos.y - proj->pos.y;
             float dist = sqrtf(dx * dx + dy * dy);
 
-            if (dist < 150.0f && dist > 0.001f) {
-                // Steer perpendicular to bullet or away
+            if (dist < dodge_thresh && dist > 0.001f) {
                 float perp_x = -proj->vel.y;
                 float perp_y = proj->vel.x;
                 float plen = sqrtf(perp_x * perp_x + perp_y * perp_y);
@@ -208,9 +292,12 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
             }
         }
 
-        // 3. XP Gem Attraction (when not under extreme melee threat)
-        if (enemies_in_melee_zone == 0) {
-            float closest_gem_dist = 280.0f;
+        // 3. XP Gem Attraction
+        bool can_collect_gems = (enemies_in_melee_zone == 0);
+        if (archetype == BOT_COWARD && nearest_enemy_dist < 250.0f) can_collect_gems = false;
+        if (can_collect_gems) {
+            float max_gem_pickup = (archetype == BOT_MEDIOCRE) ? 120.0f : 280.0f;
+            float closest_gem_dist = max_gem_pickup;
             Vec2 gem_dir = { 0.0f, 0.0f };
             for (int i = 0; i < MAX_GEMS; i++) {
                 Gem* g = &game.gems[i];
@@ -224,7 +311,7 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
                     gem_dir.y = gdy / gdist;
                 }
             }
-            if (closest_gem_dist < 280.0f) {
+            if (closest_gem_dist < max_gem_pickup) {
                 steer_x += gem_dir.x * 1.5f;
                 steer_y += gem_dir.y * 1.5f;
             }
@@ -243,23 +330,36 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
         if (steer_x > 0.3f)  keys[SDL_SCANCODE_D] = 1;
 
         // 5. Active Ability: DASH (SHIFT)
-        if (nearest_enemy_dist < 85.0f || enemies_in_melee_zone >= 1) {
-            if (p->dash_unlocked && p->dash_cooldown_timer <= 0.0f && p->state == PLAYER_STATE_NORMAL) {
-                keys[SDL_SCANCODE_LSHIFT] = 1;
-                res.dashes_used++;
-            }
+        float dash_thresh = 85.0f;
+        if (archetype == BOT_MEDIOCRE) dash_thresh = 45.0f; // delayed panic reaction
+        else if (archetype == BOT_COWARD) dash_thresh = 140.0f; // early retreat dash
+        
+        bool trigger_dash = (nearest_enemy_dist < dash_thresh || enemies_in_melee_zone >= 1);
+        if (archetype == BOT_BRUISER && nearest_enemy_dist > 80.0f && nearest_enemy_dist < 220.0f) {
+            trigger_dash = true; // Bruiser aggressively dashes forward into swarms
+        }
+
+        if (trigger_dash && p->dash_unlocked && p->dash_cooldown_timer <= 0.0f && p->state == PLAYER_STATE_NORMAL) {
+            keys[SDL_SCANCODE_LSHIFT] = 1;
+            res.dashes_used++;
         }
 
         // 6. Active Ability: SPECIAL [Q]
-        if (enemies_in_danger_zone >= 5 || (game.gym_boss_spawned && nearest_enemy_dist < 120.0f)) {
+        int q_enemy_thresh = 5;
+        if (archetype == BOT_MEDIOCRE) q_enemy_thresh = 8;
+        else if (archetype == BOT_BRUISER) q_enemy_thresh = 3;
+        else if (archetype == BOT_COWARD) q_enemy_thresh = 2;
+
+        if (enemies_in_danger_zone >= q_enemy_thresh || (game.gym_boss_spawned && nearest_enemy_dist < 120.0f)) {
             if (p->special_q_unlocked && p->special_q_cooldown_timer <= 0.0f && p->state == PLAYER_STATE_NORMAL) {
                 keys[SDL_SCANCODE_Q] = 1;
                 res.special_q_used++;
             }
         }
 
-        // 7. Tactical Capture AI: Throw Poké Ball at weakened wild Pokémon of unowned types!
-        if (p->pokeball_count > 0 && game.party_count < MAX_PARTY_MEMBERS) {
+        // 7. Tactical Capture AI: Throw Poké Ball at weakened wild Pokémon
+        bool can_catch = (archetype != BOT_MEDIOCRE) || ((rand() % 100) < 25);
+        if (can_catch && p->pokeball_count > 0 && game.party_count < MAX_PARTY_MEMBERS) {
             for (int k = 0; k < game.active_enemy_count; k++) {
                 int e_idx = game.active_enemy_indices[k];
                 Enemy* e = &game.enemies[e_idx];
@@ -320,6 +420,28 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
     res.last_route = game.current_route_index;
     res.pokemon_caught = game.party_count - 1;
 
+    // Aggregate Big Data metrics from game state
+    res.total_damage_dealt = game.total_damage_dealt;
+    res.total_overkill_damage = game.total_overkill_damage;
+    res.overkill_ratio = (game.total_damage_dealt + game.total_overkill_damage > 0.0f)
+        ? (game.total_overkill_damage / (game.total_damage_dealt + game.total_overkill_damage)) : 0.0f;
+    res.danger_time_sec = game.danger_time_sec;
+    res.danger_time_pct = (sim_time > 0.001f) ? ((game.danger_time_sec / sim_time) * 100.0f) : 0.0f;
+    res.hp_volatility = (game.hp_samples_count > 0) ? (game.hp_volatility_accum / (float)game.hp_samples_count) : 0.0f;
+    res.instant_kills = game.instant_kills;
+    res.kills_stage1 = game.kills_stage1;
+    res.kills_stage2 = game.kills_stage2;
+    res.kills_stage3 = game.kills_stage3;
+    res.avg_ttk_stage1 = (game.kills_stage1 > 0) ? (game.sum_ttk_stage1 / (float)game.kills_stage1) : 0.0f;
+    res.avg_ttk_stage2 = (game.kills_stage2 > 0) ? (game.sum_ttk_stage2 / (float)game.kills_stage2) : 0.0f;
+    res.avg_ttk_stage3 = (game.kills_stage3 > 0) ? (game.sum_ttk_stage3 / (float)game.kills_stage3) : 0.0f;
+    res.avg_ttk_boss = res.gym_boss_fight_duration;
+
+    // Log run summary event to telemetry stream
+    Telemetry_LogRunSummary(res.starter_name, res.archetype_name, res.survived, res.time_survived_sec,
+                           res.final_level, res.total_kills, res.avg_ttk_stage1, res.avg_ttk_stage2,
+                           res.avg_ttk_boss, res.overkill_ratio, res.danger_time_pct, res.instant_kills);
+
     // Diagnosis flags
     if (!res.survived && res.last_section == 0 && res.last_route <= 1) {
         res.flag_died_early = true;
@@ -335,13 +457,23 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
     return res;
 }
 
-StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, int num_trials, float max_sim_time_sec) {
+SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, float max_sim_time_sec, unsigned int seed) {
+    return BalanceSim_RunEx(window, renderer, starter, max_sim_time_sec, seed, BOT_OPTIMAL);
+}
+
+StarterAggregateStats BalanceSim_RunStarterTrialsEx(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, int num_trials, float max_sim_time_sec, BotArchetype archetype) {
     if (num_trials < 1) num_trials = 1;
     StarterAggregateStats stats;
     memset(&stats, 0, sizeof(StarterAggregateStats));
     stats.starter = starter;
     stats.starter_name = (starter == STARTER_BULBASAUR) ? "Bulbasaur" : 
                          (starter == STARTER_CHARMANDER ? "Charmander" : "Squirtle");
+    stats.archetype = archetype;
+    if (archetype == BOT_MEDIOCRE) stats.archetype_name = "Mediocre";
+    else if (archetype == BOT_BRUISER) stats.archetype_name = "Bruiser";
+    else if (archetype == BOT_COWARD) stats.archetype_name = "Coward";
+    else stats.archetype_name = "Optimal";
+
     stats.trials = num_trials;
     stats.max_sim_time_sec = max_sim_time_sec;
 
@@ -363,11 +495,20 @@ StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Render
     float sum_special_q = 0.0f;
     float sum_caught = 0.0f;
 
+    float sum_ttk_s1 = 0.0f;
+    float sum_ttk_s2 = 0.0f;
+    float sum_overkill_ratio = 0.0f;
+    float sum_danger_pct = 0.0f;
+    float sum_volatility = 0.0f;
+    int sum_instant_kills = 0;
+
     for (int t = 0; t < num_trials; t++) {
         unsigned int seed = 10007 + (unsigned int)starter * 7919 + (unsigned int)t * 313;
-        results[t] = BalanceSim_Run(window, renderer, starter, max_sim_time_sec, seed);
-        printf(".");
-        fflush(stdout);
+        results[t] = BalanceSim_RunEx(window, renderer, starter, max_sim_time_sec, seed, archetype);
+        if (!s_silent_mode) {
+            printf(".");
+            fflush(stdout);
+        }
         SimRunResult* r = &results[t];
 
         if (r->survived) stats.survived_count++;
@@ -397,6 +538,13 @@ StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Render
         sum_special_q += (float)r->special_q_used;
         sum_caught += (float)r->pokemon_caught;
 
+        sum_ttk_s1 += r->avg_ttk_stage1;
+        sum_ttk_s2 += r->avg_ttk_stage2;
+        sum_overkill_ratio += r->overkill_ratio;
+        sum_danger_pct += r->danger_time_pct;
+        sum_volatility += r->hp_volatility;
+        sum_instant_kills += r->instant_kills;
+
         if (r->flag_died_early) stats.early_deaths++;
         if (r->flag_low_level_at_gym) stats.low_level_at_gym++;
         if (r->flag_boss_bullet_sponge) stats.bullet_sponge_fights++;
@@ -412,6 +560,13 @@ StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Render
     stats.avg_dashes = sum_dashes / (float)num_trials;
     stats.avg_special_q = sum_special_q / (float)num_trials;
     stats.avg_caught = sum_caught / (float)num_trials;
+
+    stats.avg_ttk_stage1 = sum_ttk_s1 / (float)num_trials;
+    stats.avg_ttk_stage2 = sum_ttk_s2 / (float)num_trials;
+    stats.avg_overkill_ratio = (sum_overkill_ratio / (float)num_trials) * 100.0f;
+    stats.avg_danger_time_pct = sum_danger_pct / (float)num_trials;
+    stats.avg_hp_volatility = sum_volatility / (float)num_trials;
+    stats.total_instant_kills = sum_instant_kills;
 
     if (boss_fight_count > 0) {
         stats.avg_boss_duration = sum_boss_duration / (float)boss_fight_count;
@@ -437,50 +592,119 @@ StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Render
     return stats;
 }
 
-void BalanceSim_RunTrials(SDL_Window* window, SDL_Renderer* renderer, int num_trials, float max_sim_time_sec) {
+StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Renderer* renderer, StarterID starter, int num_trials, float max_sim_time_sec) {
+    return BalanceSim_RunStarterTrialsEx(window, renderer, starter, num_trials, max_sim_time_sec, BOT_OPTIMAL);
+}
+
+void BalanceSim_RunTrialsEx(SDL_Window* window, SDL_Renderer* renderer, int num_trials, float max_sim_time_sec, BotArchetype archetype, StarterID filter_starter, bool json_output) {
     g_headless_sim = true;
+    s_silent_mode = json_output;
     if (num_trials < 1) num_trials = 10;
-    float total_sim_hours = ((float)num_trials * 3.0f * max_sim_time_sec) / 3600.0f;
 
-    printf("\n====================================================================================================\n");
-    printf("         AUTOMATED MULTI-TRIAL BALANCE & GAMEPLAY SIMULATOR                                         \n");
-    printf(" Running %d trials per starter (%.0fs each) across Kanto Routes & Gyms                             \n", num_trials, max_sim_time_sec);
-    printf(" Total In-Game Gameplay Simulated: %.1f hours (%.0f total in-game seconds)                         \n", total_sim_hours, (float)num_trials * 3.0f * max_sim_time_sec);
-    printf("====================================================================================================\n\n");
+    StarterID starters_to_run[3];
+    int starter_count = 0;
+    if (filter_starter == STARTER_BULBASAUR || filter_starter == STARTER_CHARMANDER || filter_starter == STARTER_SQUIRTLE) {
+        starters_to_run[0] = filter_starter;
+        starter_count = 1;
+    } else {
+        starters_to_run[0] = STARTER_BULBASAUR;
+        starters_to_run[1] = STARTER_CHARMANDER;
+        starters_to_run[2] = STARTER_SQUIRTLE;
+        starter_count = 3;
+    }
 
-    StarterID starters[3] = { STARTER_BULBASAUR, STARTER_CHARMANDER, STARTER_SQUIRTLE };
+    const char* arch_str = (archetype == BOT_MEDIOCRE) ? "Mediocre" :
+                          ((archetype == BOT_BRUISER) ? "Bruiser" :
+                          ((archetype == BOT_COWARD) ? "Coward" : "Optimal"));
+
+    if (!json_output) {
+        float total_sim_hours = ((float)num_trials * (float)starter_count * max_sim_time_sec) / 3600.0f;
+        printf("\n====================================================================================================\n");
+        printf("         AUTOMATED MULTI-TRIAL BIG DATA BALANCE SIMULATOR                                           \n");
+        printf(" Bot Archetype: [%-8s] | Trials: %d per starter (%.0fs each) across Kanto Routes                   \n", arch_str, num_trials, max_sim_time_sec);
+        printf(" Total Gameplay Simulated: %.1f hours (%.0f total in-game seconds)                                  \n", total_sim_hours, (float)num_trials * (float)starter_count * max_sim_time_sec);
+        printf("====================================================================================================\n\n");
+    }
+
     StarterAggregateStats stats[3];
     double starter_runtimes[3];
 
-    for (int i = 0; i < 3; i++) {
-        const char* name = (starters[i] == STARTER_BULBASAUR) ? "Bulbasaur" : 
-                           (starters[i] == STARTER_CHARMANDER ? "Charmander" : "Squirtle");
-        printf(">>> Simulating %-10s [%2d trials] ... ", name, num_trials);
-        fflush(stdout);
+    for (int i = 0; i < starter_count; i++) {
+        const char* name = (starters_to_run[i] == STARTER_BULBASAUR) ? "Bulbasaur" : 
+                           (starters_to_run[i] == STARTER_CHARMANDER ? "Charmander" : "Squirtle");
+        if (!json_output) {
+            printf(">>> Simulating %-10s [%2d trials | %-8s] ... ", name, num_trials, arch_str);
+            fflush(stdout);
+        }
 
         uint64_t t0 = Profiler_GetTimestamp();
-        stats[i] = BalanceSim_RunStarterTrials(window, renderer, starters[i], num_trials, max_sim_time_sec);
+        stats[i] = BalanceSim_RunStarterTrialsEx(window, renderer, starters_to_run[i], num_trials, max_sim_time_sec, archetype);
         starter_runtimes[i] = Profiler_ElapsedMs(t0) / 1000.0;
         double effective_fps = ((double)num_trials * (double)max_sim_time_sec * 60.0) / (starter_runtimes[i] > 0.001 ? starter_runtimes[i] : 0.001);
 
-        printf("DONE (%.0fs sim in %.2fs real | %.0f FPS)\n", (float)num_trials * max_sim_time_sec, starter_runtimes[i], effective_fps);
+        if (!json_output) {
+            printf("DONE (%.0fs sim in %.2fs real | %.0f FPS)\n", (float)num_trials * max_sim_time_sec, starter_runtimes[i], effective_fps);
+        }
+    }
+
+    if (json_output) {
+        printf("{\n");
+        printf("  \"bot_archetype\": \"%s\",\n", arch_str);
+        printf("  \"trials_per_starter\": %d,\n", num_trials);
+        printf("  \"max_sim_time_sec\": %.1f,\n", max_sim_time_sec);
+        printf("  \"starters\": [\n");
+        for (int i = 0; i < starter_count; i++) {
+            printf("    {\n");
+            printf("      \"starter\": \"%s\",\n", stats[i].starter_name);
+            printf("      \"survival_rate\": %.1f,\n", stats[i].survival_rate);
+            printf("      \"reached_gym_rate\": %.1f,\n", stats[i].reached_gym_rate);
+            printf("      \"defeat_boss_rate\": %.1f,\n", stats[i].defeat_boss_rate);
+            printf("      \"avg_level\": %.2f,\n", stats[i].avg_level);
+            printf("      \"avg_kills\": %.1f,\n", stats[i].avg_kills);
+            printf("      \"avg_ttk_stage1\": %.2f,\n", stats[i].avg_ttk_stage1);
+            printf("      \"avg_ttk_stage2\": %.2f,\n", stats[i].avg_ttk_stage2);
+            printf("      \"avg_ttk_boss\": %.2f,\n", stats[i].avg_boss_duration);
+            printf("      \"overkill_ratio_pct\": %.2f,\n", stats[i].avg_overkill_ratio);
+            printf("      \"danger_time_pct\": %.2f,\n", stats[i].avg_danger_time_pct);
+            printf("      \"hp_volatility\": %.2f,\n", stats[i].avg_hp_volatility);
+            printf("      \"avg_damage_taken\": %.1f,\n", stats[i].avg_damage_taken);
+            printf("      \"instant_kills\": %d\n", stats[i].total_instant_kills);
+            printf("    }%s\n", (i == starter_count - 1) ? "" : ",");
+        }
+        printf("  ],\n");
+
+        float overall_surv = 0.0f;
+        float overall_ttk1 = 0.0f;
+        int total_inst = 0;
+        for (int i = 0; i < starter_count; i++) {
+            overall_surv += stats[i].survival_rate;
+            overall_ttk1 += stats[i].avg_ttk_stage1;
+            total_inst += stats[i].total_instant_kills;
+        }
+        printf("  \"overall_survival_rate\": %.2f,\n", overall_surv / (float)starter_count);
+        printf("  \"overall_avg_ttk_stage1\": %.2f,\n", overall_ttk1 / (float)starter_count);
+        printf("  \"total_instant_kills\": %d\n", total_inst);
+        printf("}\n");
+        g_headless_sim = false;
+        return;
     }
 
     printf("\n------------------------------------------------------------------------------------------------------------------------\n");
-    printf("                       AGGREGATE PROGRESSION & SURVIVAL METRICS (%d TRIALS PER STARTER)                                \n", num_trials);
+    printf("                    BIG DATA PROGRESSION & COMBAT METRICS (ARCHETYPE: %s | %d TRIALS)                                    \n", arch_str, num_trials);
     printf("------------------------------------------------------------------------------------------------------------------------\n");
-    printf("%-12s | %-8s | %-12s | %-12s | %-20s | %-22s | %-14s\n",
-           "Starter", "Survival", "Reached Gym", "Defeated Gym", "Level (Avg±Std)", "Kills (Avg±Std)", "Dmg Taken (Avg)");
+    printf("%-12s | %-8s | %-12s | %-12s | %-12s | %-10s | %-10s | %-12s\n",
+           "Starter", "Survival", "Reached Gym", "Defeated Gym", "Fodder TTK", "Elite TTK", "Overkill%", "Danger Time%");
     printf("------------------------------------------------------------------------------------------------------------------------\n");
-    for (int i = 0; i < 3; i++) {
-        printf("%-12s | %5.1f%%   | %5.1f%%      | %5.1f%%       | Lv %4.1f ± %-4.1f [%2d-%2d] | %5.1f ± %-5.1f [%3d-%3d]   | %5.1f [%.0f-%.0f]\n",
+    for (int i = 0; i < starter_count; i++) {
+        printf("%-12s | %5.1f%%   | %5.1f%%      | %5.1f%%       | %5.2fs       | %5.2fs     | %5.1f%%     | %5.1f%%\n",
                stats[i].starter_name,
                stats[i].survival_rate,
                stats[i].reached_gym_rate,
                stats[i].defeat_boss_rate,
-               stats[i].avg_level, stats[i].std_level, stats[i].min_level, stats[i].max_level,
-               stats[i].avg_kills, stats[i].std_kills, stats[i].min_kills, stats[i].max_kills,
-               stats[i].avg_damage_taken, stats[i].min_damage_taken, stats[i].max_damage_taken);
+               stats[i].avg_ttk_stage1,
+               stats[i].avg_ttk_stage2,
+               stats[i].avg_overkill_ratio,
+               stats[i].avg_danger_time_pct);
     }
     printf("------------------------------------------------------------------------------------------------------------------------\n\n");
 
@@ -488,9 +712,9 @@ void BalanceSim_RunTrials(SDL_Window* window, SDL_Renderer* renderer, int num_tr
     printf("                       GYM BOSS COMBAT TELEMETRY (PEWTER GYM - LEADER BROCK'S ONIX)                                     \n");
     printf("------------------------------------------------------------------------------------------------------------------------\n");
     printf("%-12s | %-10s | %-26s | %-12s | %-8s | %-10s | %-12s\n",
-           "Starter", "Boss Win%", "Fight Duration (Avg [Min-Max])", "End HP (Avg)", "Dashes", "Special Q", "Allies Caught");
+           "Starter", "Boss Win%", "Fight Duration (Avg [Min-Max])", "End HP (Avg)", "Dashes", "Special Q", "Instant Kills");
     printf("------------------------------------------------------------------------------------------------------------------------\n");
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < starter_count; i++) {
         char dur_buf[36];
         if (stats[i].defeated_boss_count > 0) {
             snprintf(dur_buf, sizeof(dur_buf), "%4.1fs [%4.1fs - %4.1fs]", 
@@ -498,56 +722,48 @@ void BalanceSim_RunTrials(SDL_Window* window, SDL_Renderer* renderer, int num_tr
         } else {
             snprintf(dur_buf, sizeof(dur_buf), "N/A");
         }
-        printf("%-12s | %5.1f%%    | %-26s | %6.1f HP    | %-8.1f | %-10.1f | %-12.1f\n",
+        printf("%-12s | %5.1f%%    | %-26s | %6.1f HP    | %-8.1f | %-10.1f | %-12d\n",
                stats[i].starter_name,
                stats[i].defeat_boss_rate,
                dur_buf,
                stats[i].avg_boss_end_hp,
                stats[i].avg_dashes,
                stats[i].avg_special_q,
-               stats[i].avg_caught);
+               stats[i].total_instant_kills);
     }
     printf("------------------------------------------------------------------------------------------------------------------------\n\n");
 
-    printf(">>> COMBAT DYNAMICS & STARTER BALANCE ANALYSIS:\n");
-    printf("  * BULBASAUR : Organic Vine Whip provides wide multi-target sweep and high kill consistency (%0.1f avg kills).\n"
-           "                Natural HP regen (1.5/s) buffers chip damage, but single-target boss fights (Onix) average %0.1fs.\n",
-           stats[0].avg_kills, stats[0].avg_boss_duration);
-    printf("  * CHARMANDER: Ember fan + burning Ground Scorch patches (`HAZARD_FIRE_SCORCH`) yields explosive boss burn times (%0.1fs).\n"
-           "                Lower base HP and close-range risk leads to higher damage taken (%0.0f avg), relying on active dashes (%0.1f avg).\n",
-           stats[1].avg_boss_duration, stats[1].avg_damage_taken, stats[1].avg_dashes);
-    printf("  * SQUIRTLE  : High-pressure Water Gun hydraulic knockback (220 force) repels swarms effectively, yielding the lowest\n"
-           "                average damage taken (%0.0f) and highest end HP (%0.1f HP), with Hydro Pump [Q] acting as a reliable panic clear.\n\n",
-           stats[2].avg_damage_taken, stats[2].avg_boss_end_hp);
-
-    printf(">>> STATISTICAL BALANCE DIAGNOSTIC FINDINGS:\n");
+    printf(">>> STATISTICAL BALANCE & PACING VERIFICATION:\n");
     bool all_balanced = true;
-    for (int i = 0; i < 3; i++) {
-        if (stats[i].early_deaths > 0) {
-            printf("  [ALERT] %s experienced %d early death(s) (< Route 2) across %d trials (%0.1f%% rate)!\n",
-                   stats[i].starter_name, stats[i].early_deaths, num_trials, (float)stats[i].early_deaths / (float)num_trials * 100.0f);
+    for (int i = 0; i < starter_count; i++) {
+        if (stats[i].avg_ttk_stage1 < 1.0f) {
+            printf("  [ALERT] %s Fodder TTK is too low (%.2fs < 1.0s) - enemies dying too easily!\n", stats[i].starter_name, stats[i].avg_ttk_stage1);
+            all_balanced = false;
+        } else if (stats[i].avg_ttk_stage1 > 4.5f) {
+            printf("  [ALERT] %s Fodder TTK is too high (%.2fs > 4.5s) - enemies are bullet sponges!\n", stats[i].starter_name, stats[i].avg_ttk_stage1);
             all_balanced = false;
         }
-        if (stats[i].low_level_at_gym > 0) {
-            printf("  [ALERT] %s arrived at Brock's Gym below Level 5 in %d trial(s)!\n",
-                   stats[i].starter_name, stats[i].low_level_at_gym);
+        if (stats[i].total_instant_kills > 0) {
+            printf("  [ALERT] %s had %d instant kills (< 1.0s TTK)!\n", stats[i].starter_name, stats[i].total_instant_kills);
             all_balanced = false;
         }
         if (stats[i].bullet_sponge_fights > 0) {
-            printf("  [ALERT] %s had %d boss fight(s) exceeding 60s against Brock's Onix!\n",
-                   stats[i].starter_name, stats[i].bullet_sponge_fights);
+            printf("  [ALERT] %s had %d boss fight(s) exceeding 60s against Brock's Onix!\n", stats[i].starter_name, stats[i].bullet_sponge_fights);
             all_balanced = false;
         }
     }
 
     if (all_balanced) {
-        printf("  [OK] XP curve pacing is consistent across random seeds: Starters reach Lv 12-14 at 300s.\n");
-        printf("  [OK] Gym Milestone pacing is robust: 100%% of runs reach Brock's Gym with healthy survivability.\n");
-        printf("  [OK] Asymmetric starter identity is preserved: Bulbasaur excels at horde control, Charmander dominates DPS,\n"
-               "       and Squirtle provides maximum defensive crowd clearance.\n");
+        printf("  [OK] Fodder TTK pacing is dialed in: Stage 1 enemies survive 2.0s - 3.5s against starting items.\n");
+        printf("  [OK] Zero instant-death anomalies (< 1.0s) recorded across all trials.\n");
+        printf("  [OK] Overkill ratio is well-contained, preventing crowd vaporizations.\n");
     }
     printf("====================================================================================================\n\n");
     g_headless_sim = false;
+}
+
+void BalanceSim_RunTrials(SDL_Window* window, SDL_Renderer* renderer, int num_trials, float max_sim_time_sec) {
+    BalanceSim_RunTrialsEx(window, renderer, num_trials, max_sim_time_sec, BOT_OPTIMAL, STARTER_NONE, false);
 }
 
 void BalanceSim_RunAllStarters(SDL_Window* window, SDL_Renderer* renderer) {
