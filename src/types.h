@@ -133,20 +133,22 @@ typedef struct {
 } PokedexEntry;
 
 #define MAX_ACTIVE_WEAPONS 4
+#define MAX_PARTY_MEMBERS 3
 
 typedef enum {
     WEAPON_NONE = 0,
     // Base Weapons
-    WEAPON_VINE_WHIP,       // Spline wavy whips targeting close foes
-    WEAPON_FLAMETHROWER,    // Directional channeled flame cone + scorch
-    WEAPON_BUBBLE_BEAM,     // Buoyant bubbles trapping & popping enemies
-    WEAPON_PETAL_DANCE,     // Orbiting flower blossoms expanding, spinning, dissipating
-    WEAPON_FIRE_SPIN,       // Whirling fireballs orbiting closely with high burn DPS
-    WEAPON_AQUA_ORBS,       // Fast rotating water spheres with massive knockback
-    WEAPON_RAZOR_LEAF,      // Sharp spinning leaves launched at nearby enemies
-    WEAPON_SWIFT,           // Seeking golden psychic stars that home in on foes
-    WEAPON_THUNDER_SHOCK,   // Periodic vertical lightning bolt strikes from the sky
-    WEAPON_TOXIC_SPORE,     // Expanding poison spore ring leaving slowing toxic pools
+    WEAPON_VINE_WHIP,       // Spline wavy whips targeting close foes (Grass)
+    WEAPON_FLAMETHROWER,    // Directional channeled flame cone + scorch (Fire)
+    WEAPON_BUBBLE_BEAM,     // Buoyant bubbles trapping & popping enemies (Water)
+    WEAPON_PETAL_DANCE,     // Orbiting flower blossoms expanding, spinning, dissipating (Grass)
+    WEAPON_FIRE_SPIN,       // Whirling fireballs orbiting closely with high burn DPS (Fire)
+    WEAPON_AQUA_ORBS,       // Fast rotating water spheres with massive knockback (Water)
+    WEAPON_RAZOR_LEAF,      // Sharp spinning leaves launched at nearby enemies (Grass)
+    WEAPON_SWIFT,           // Seeking golden psychic stars that home in on foes (Normal)
+    WEAPON_THUNDER_SHOCK,   // Periodic vertical lightning bolt strikes from the sky (Electric)
+    WEAPON_TOXIC_SPORE,     // Expanding poison spore ring leaving slowing toxic pools (Poison)
+    WEAPON_ROCK_SLIDE,      // Tumbling crashing boulders dealing heavy blunt impact (Rock/Ground)
     
     // Evolved / Combined Weapons (Fusions)
     WEAPON_SOLAR_FRENZY,    // Vine Whip + Petal Dance: 4-way solar spline whips + perpetual petal storm
@@ -154,6 +156,11 @@ typedef enum {
     WEAPON_HYDRO_VORTEX,    // Bubble Beam + Aqua Orbs: Iridescent bubble maelstrom suctioning and detonating crowds
     WEAPON_PLASMA_TEMPEST,  // Swift + Thunder Shock: Homing golden stars triggering chain lightning arcs
     WEAPON_VENOM_CATACLYSM, // Razor Leaf + Toxic Spore: Corrosive acid leaves melting armor and leaving toxic mires
+    WEAPON_SCALD_MAELSTROM, // Flamethrower + Bubble Beam: Boiling steam jets + scalding mist geysers (Fire + Water)
+    WEAPON_WILDFIRE,        // Flamethrower + Razor Leaf: Piercing flaming leaves igniting ground wildfires (Fire + Grass)
+    WEAPON_VERDANT_SURGE,   // Bubble Beam + Petal Dance: Aquatic lotus blossom shields that heal on hit (Water + Grass)
+    WEAPON_STORM_SURGE,     // Bubble Beam + Thunder Shock: Electrified water bubbles exploding into thunder (Water + Electric)
+    WEAPON_MAGMA_ERUPTION,  // Fire Spin + Rock Slide: Molten flaming meteors erupting into volcanic lava (Fire + Rock)
 
     WEAPON_TYPE_COUNT
 } WeaponType;
@@ -172,6 +179,22 @@ typedef struct {
     float range;
     float state_timer;       // for custom cycle timers (e.g. Petal Dance bloom, Fire Blast star burst)
 } ActiveWeaponSlot;
+
+typedef struct {
+    bool active;
+    int pokedex_id;
+    char name[32];
+    PokeType type1;
+    PokeType type2;
+    Vec2 pos;
+    Vec2 vel;
+    float sprite_scale;
+    SpriteSheet sprite;
+    AnimState anim;
+    float attack_cooldown;
+    float attack_timer;
+    float follow_angle_offset;
+} PartyMember;
 
 typedef struct {
     StarterID starter;
@@ -228,6 +251,7 @@ typedef struct {
     ActiveWeaponSlot weapons[MAX_ACTIVE_WEAPONS];
     int weapon_count;
     Vec2 aim_dir;
+    int pokeball_count; // Number of available Poké Balls to catch wild Pokémon (max 2)
 
     SpriteSheet sprite;          // default walk sprite
     SpriteSheet sprite_charge;   // Charge-Anim.png for Dash
@@ -327,6 +351,9 @@ typedef enum {
     PROJ_SWIFT_STAR    = 11, // Homing golden star
     PROJ_LIGHTNING_BOLT= 12, // Vertical crackling lightning strike
     PROJ_FIRE_BLAST    = 13, // Giant kanji "大" starburst
+    PROJ_POKEBALL      = 14, // Thrown Poké Ball capture device
+    PROJ_ROCK_SLIDE    = 15, // Tumbling crushing boulder
+    PROJ_SCALD_BUBBLE  = 16, // Superheated boiling steam bubble
 } ProjectileType;
 
 typedef enum {
@@ -335,6 +362,7 @@ typedef enum {
     HAZARD_MORTAR_TARGET = 2, // Enemy mortar telegraph shadow / danger zone
     HAZARD_ACID_MIRE     = 3, // Corrosive toxic mire pool (Venom Cataclysm)
     HAZARD_LAVA_POOL     = 4, // Molten lava zone (Fire Blast)
+    HAZARD_SCALD_MIST    = 5, // Boiling scalding steam geyser (Scald Maelstrom)
 } HazardType;
 
 typedef struct {
@@ -548,6 +576,8 @@ typedef struct {
     bool mouse_active;
     
     Player player;
+    PartyMember party[MAX_PARTY_MEMBERS];
+    int party_count;
     EnemyTypeConfig enemy_types[MAX_ENEMY_TYPES];
     int active_enemy_type_count;
     Enemy enemies[MAX_ENEMIES];

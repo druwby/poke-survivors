@@ -258,6 +258,32 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
             }
         }
 
+        // 7. Tactical Capture AI: Throw Poké Ball at weakened wild Pokémon of unowned types!
+        if (p->pokeball_count > 0 && game.party_count < MAX_PARTY_MEMBERS) {
+            for (int k = 0; k < game.active_enemy_count; k++) {
+                int e_idx = game.active_enemy_indices[k];
+                Enemy* e = &game.enemies[e_idx];
+                if (!e->active || e->is_underground) continue;
+                if (game.enemy_types[e->type].is_boss) continue;
+
+                if (e->hp <= e->max_hp * 0.35f) {
+                    float edx = e->pos.x - p->pos.x;
+                    float edy = e->pos.y - p->pos.y;
+                    float edist = sqrtf(edx * edx + edy * edy);
+                    if (edist < 240.0f && edist > 0.001f) {
+                        int pid = game.enemy_types[e->type].pokedex_id;
+                        const PokedexEntry* entry = Pokedex_GetEntry(pid);
+                        if (entry && (!Party_HasType(&game, entry->type1) || 
+                                     (entry->type2 != POKE_TYPE_NONE && !Party_HasType(&game, entry->type2)))) {
+                            p->aim_dir = (Vec2){ edx / edist, edy / edist };
+                            Game_ThrowPokeball(&game);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // Track Gym Boss Battle
         const RouteConfig* route = KantoRoutes_GetCurrentRoute(&game);
         if (route && route->is_gym) {
@@ -292,6 +318,7 @@ SimRunResult BalanceSim_Run(SDL_Window* window, SDL_Renderer* renderer, StarterI
     res.total_kills = game.player.kills;
     res.last_section = game.current_section;
     res.last_route = game.current_route_index;
+    res.pokemon_caught = game.party_count - 1;
 
     // Diagnosis flags
     if (!res.survived && res.last_section == 0 && res.last_route <= 1) {
@@ -334,6 +361,7 @@ StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Render
     float sum_boss_end_hp = 0.0f;
     float sum_dashes = 0.0f;
     float sum_special_q = 0.0f;
+    float sum_caught = 0.0f;
 
     for (int t = 0; t < num_trials; t++) {
         unsigned int seed = 10007 + (unsigned int)starter * 7919 + (unsigned int)t * 313;
@@ -367,6 +395,7 @@ StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Render
 
         sum_dashes += (float)r->dashes_used;
         sum_special_q += (float)r->special_q_used;
+        sum_caught += (float)r->pokemon_caught;
 
         if (r->flag_died_early) stats.early_deaths++;
         if (r->flag_low_level_at_gym) stats.low_level_at_gym++;
@@ -382,6 +411,7 @@ StarterAggregateStats BalanceSim_RunStarterTrials(SDL_Window* window, SDL_Render
     stats.avg_damage_taken = sum_dmg_taken / (float)num_trials;
     stats.avg_dashes = sum_dashes / (float)num_trials;
     stats.avg_special_q = sum_special_q / (float)num_trials;
+    stats.avg_caught = sum_caught / (float)num_trials;
 
     if (boss_fight_count > 0) {
         stats.avg_boss_duration = sum_boss_duration / (float)boss_fight_count;
@@ -457,8 +487,8 @@ void BalanceSim_RunTrials(SDL_Window* window, SDL_Renderer* renderer, int num_tr
     printf("------------------------------------------------------------------------------------------------------------------------\n");
     printf("                       GYM BOSS COMBAT TELEMETRY (PEWTER GYM - LEADER BROCK'S ONIX)                                     \n");
     printf("------------------------------------------------------------------------------------------------------------------------\n");
-    printf("%-12s | %-12s | %-28s | %-14s | %-12s | %-12s\n",
-           "Starter", "Boss Win%", "Fight Duration (Avg [Min-Max])", "End HP (Avg)", "Dashes (Avg)", "Special Q (Avg)");
+    printf("%-12s | %-10s | %-26s | %-12s | %-8s | %-10s | %-12s\n",
+           "Starter", "Boss Win%", "Fight Duration (Avg [Min-Max])", "End HP (Avg)", "Dashes", "Special Q", "Allies Caught");
     printf("------------------------------------------------------------------------------------------------------------------------\n");
     for (int i = 0; i < 3; i++) {
         char dur_buf[36];
@@ -468,13 +498,14 @@ void BalanceSim_RunTrials(SDL_Window* window, SDL_Renderer* renderer, int num_tr
         } else {
             snprintf(dur_buf, sizeof(dur_buf), "N/A");
         }
-        printf("%-12s | %5.1f%%      | %-28s | %6.1f HP      | %-12.1f | %-12.1f\n",
+        printf("%-12s | %5.1f%%    | %-26s | %6.1f HP    | %-8.1f | %-10.1f | %-12.1f\n",
                stats[i].starter_name,
                stats[i].defeat_boss_rate,
                dur_buf,
                stats[i].avg_boss_end_hp,
                stats[i].avg_dashes,
-               stats[i].avg_special_q);
+               stats[i].avg_special_q,
+               stats[i].avg_caught);
     }
     printf("------------------------------------------------------------------------------------------------------------------------\n\n");
 

@@ -61,13 +61,61 @@ void Weapons_Init(WeaponsManager* wm) {
 // ROGUELIKE WEAPON SYSTEM: CATALOG & EVOLUTION RECIPES
 // -----------------------------------------------------------------------------
 const EvolutionRecipe g_evolution_recipes[] = {
-    { WEAPON_VINE_WHIP,    WEAPON_PETAL_DANCE,   WEAPON_SOLAR_FRENZY,    "Solar Frenzy",    "FUSION: 4-way solar spline whips + perpetual blooming petal storm!" },
-    { WEAPON_FLAMETHROWER, WEAPON_FIRE_SPIN,     WEAPON_FIRE_BLAST,      "Fire Blast Nova", "FUSION: Molten flame torrent + explosive Fire Blast starbursts & lava pools!" },
-    { WEAPON_BUBBLE_BEAM,  WEAPON_AQUA_ORBS,     WEAPON_HYDRO_VORTEX,    "Hydro Vortex",    "FUSION: Spinning bubble maelstrom suctioning and detonating swarms!" },
-    { WEAPON_SWIFT,        WEAPON_THUNDER_SHOCK, WEAPON_PLASMA_TEMPEST,  "Plasma Tempest",  "FUSION: Homing piercing stars that detonate into chain-lightning arcs!" },
-    { WEAPON_RAZOR_LEAF,   WEAPON_TOXIC_SPORE,   WEAPON_VENOM_CATACLYSM, "Venom Cataclysm", "FUSION: Toxic razor leaves that melt enemy defense and leave corrosive mires!" },
+    // Mono-Element Fusions
+    { WEAPON_VINE_WHIP,    WEAPON_PETAL_DANCE,   WEAPON_SOLAR_FRENZY,    "Solar Frenzy",    "FUSION (Grass+Grass): 4-way solar spline whips + perpetual blooming petal storm!" },
+    { WEAPON_FLAMETHROWER, WEAPON_FIRE_SPIN,     WEAPON_FIRE_BLAST,      "Fire Blast Nova", "FUSION (Fire+Fire): Molten flame torrent + explosive Fire Blast starbursts & lava pools!" },
+    { WEAPON_BUBBLE_BEAM,  WEAPON_AQUA_ORBS,     WEAPON_HYDRO_VORTEX,    "Hydro Vortex",    "FUSION (Water+Water): Spinning bubble maelstrom suctioning and detonating swarms!" },
+    { WEAPON_SWIFT,        WEAPON_THUNDER_SHOCK, WEAPON_PLASMA_TEMPEST,  "Plasma Tempest",  "FUSION (Normal+Electric): Homing piercing stars that detonate into chain-lightning arcs!" },
+    { WEAPON_RAZOR_LEAF,   WEAPON_TOXIC_SPORE,   WEAPON_VENOM_CATACLYSM, "Venom Cataclysm", "FUSION (Grass+Poison): Toxic razor leaves that melt enemy defense and leave corrosive mires!" },
+
+    // Cross-Element Fusions (Unlocked via Catching Companion Pokémon!)
+    { WEAPON_FLAMETHROWER, WEAPON_BUBBLE_BEAM,   WEAPON_SCALD_MAELSTROM, "Scald Maelstrom", "FUSION (Fire+Water): Boiling pressurized steam jets + scalding mist geysers!" },
+    { WEAPON_FLAMETHROWER, WEAPON_RAZOR_LEAF,    WEAPON_WILDFIRE,        "Wildfire Blaze",  "FUSION (Fire+Grass): Piercing flaming leaves igniting ground wildfires!" },
+    { WEAPON_BUBBLE_BEAM,  WEAPON_PETAL_DANCE,   WEAPON_VERDANT_SURGE,   "Verdant Surge",   "FUSION (Water+Grass): Aquatic lotus petals that siphon HP and wash away hordes!" },
+    { WEAPON_BUBBLE_BEAM,  WEAPON_THUNDER_SHOCK, WEAPON_STORM_SURGE,     "Storm Surge",     "FUSION (Water+Electric): Electrified water bubbles detonating into lightning!" },
+    { WEAPON_FIRE_SPIN,    WEAPON_ROCK_SLIDE,    WEAPON_MAGMA_ERUPTION,  "Magma Eruption",  "FUSION (Fire+Rock): Molten flaming meteors erupting into volcanic lava!" },
 };
-const int g_evolution_recipe_count = 5;
+const int g_evolution_recipe_count = 10;
+
+PokeType Weapons_GetType(WeaponType type) {
+    switch (type) {
+        case WEAPON_VINE_WHIP:
+        case WEAPON_PETAL_DANCE:
+        case WEAPON_RAZOR_LEAF:
+        case WEAPON_SOLAR_FRENZY:
+            return POKE_TYPE_GRASS;
+
+        case WEAPON_FLAMETHROWER:
+        case WEAPON_FIRE_SPIN:
+        case WEAPON_FIRE_BLAST:
+            return POKE_TYPE_FIRE;
+
+        case WEAPON_BUBBLE_BEAM:
+        case WEAPON_AQUA_ORBS:
+        case WEAPON_HYDRO_VORTEX:
+            return POKE_TYPE_WATER;
+
+        case WEAPON_THUNDER_SHOCK:
+            return POKE_TYPE_ELECTRIC;
+
+        case WEAPON_TOXIC_SPORE:
+        case WEAPON_VENOM_CATACLYSM:
+            return POKE_TYPE_POISON;
+
+        case WEAPON_ROCK_SLIDE:
+        case WEAPON_MAGMA_ERUPTION:
+            return POKE_TYPE_ROCK;
+
+        case WEAPON_SWIFT:
+        case WEAPON_PLASMA_TEMPEST:
+        case WEAPON_SCALD_MAELSTROM:
+        case WEAPON_WILDFIRE:
+        case WEAPON_VERDANT_SURGE:
+        case WEAPON_STORM_SURGE:
+        default:
+            return POKE_TYPE_NORMAL;
+    }
+}
 
 const char* Weapons_GetName(WeaponType type) {
     switch (type) {
@@ -81,11 +129,17 @@ const char* Weapons_GetName(WeaponType type) {
         case WEAPON_SWIFT:           return "Swift";
         case WEAPON_THUNDER_SHOCK:   return "Thunder Shock";
         case WEAPON_TOXIC_SPORE:     return "Toxic Spore";
+        case WEAPON_ROCK_SLIDE:      return "Rock Slide";
         case WEAPON_SOLAR_FRENZY:    return "Solar Frenzy";
         case WEAPON_FIRE_BLAST:      return "Fire Blast Nova";
         case WEAPON_HYDRO_VORTEX:    return "Hydro Vortex";
         case WEAPON_PLASMA_TEMPEST:  return "Plasma Tempest";
         case WEAPON_VENOM_CATACLYSM: return "Venom Cataclysm";
+        case WEAPON_SCALD_MAELSTROM: return "Scald Maelstrom";
+        case WEAPON_WILDFIRE:        return "Wildfire Blaze";
+        case WEAPON_VERDANT_SURGE:   return "Verdant Surge";
+        case WEAPON_STORM_SURGE:     return "Storm Surge";
+        case WEAPON_MAGMA_ERUPTION:  return "Magma Eruption";
         default:                     return "Unknown";
     }
 }
@@ -102,11 +156,17 @@ const char* Weapons_GetDescription(WeaponType type) {
         case WEAPON_SWIFT:           return "Golden homing stars that curve through space to strike targets.";
         case WEAPON_THUNDER_SHOCK:   return "Crackling vertical lightning bolts that strike down from above.";
         case WEAPON_TOXIC_SPORE:     return "Expanding poison spore ring that leaves slowing, damaging toxic pools.";
+        case WEAPON_ROCK_SLIDE:      return "Crashing boulders that slam down, dealing heavy blunt damage and knockback.";
         case WEAPON_SOLAR_FRENZY:    return "4-way giant solar spline whips + perpetual blooming razor petal storm!";
         case WEAPON_FIRE_BLAST:      return "Molten flame torrent + explosive Fire Blast starbursts & lava pools!";
         case WEAPON_HYDRO_VORTEX:    return "Spinning bubble maelstrom suctioning and detonating swarms!";
         case WEAPON_PLASMA_TEMPEST:  return "Homing piercing stars that detonate into chain-lightning arcs!";
         case WEAPON_VENOM_CATACLYSM: return "Toxic razor leaves that melt enemy defense and leave corrosive mires!";
+        case WEAPON_SCALD_MAELSTROM: return "Superheated steam bubbles + boiling scald mist geysers that trap foes!";
+        case WEAPON_WILDFIRE:        return "Piercing flaming razor leaves that ignite ground into persistent wildfires!";
+        case WEAPON_VERDANT_SURGE:   return "Aquatic blooming lotus petals that siphon HP and wash away hordes!";
+        case WEAPON_STORM_SURGE:     return "Electrified water bubbles that detonate into thunderous lightning strikes!";
+        case WEAPON_MAGMA_ERUPTION:  return "Molten meteors that crash down and erupt into bubbling lava pools!";
         default:                     return "";
     }
 }
@@ -123,17 +183,23 @@ SDL_Color Weapons_GetColor(WeaponType type) {
         case WEAPON_SWIFT:           return (SDL_Color){ 255, 225, 60, 255 };
         case WEAPON_THUNDER_SHOCK:   return (SDL_Color){ 255, 240, 80, 255 };
         case WEAPON_TOXIC_SPORE:     return (SDL_Color){ 180, 70, 220, 255 };
+        case WEAPON_ROCK_SLIDE:      return (SDL_Color){ 180, 150, 90, 255 };
         case WEAPON_SOLAR_FRENZY:    return (SDL_Color){ 255, 230, 80, 255 };
         case WEAPON_FIRE_BLAST:      return (SDL_Color){ 255, 60, 30, 255 };
         case WEAPON_HYDRO_VORTEX:    return (SDL_Color){ 40, 220, 255, 255 };
         case WEAPON_PLASMA_TEMPEST:  return (SDL_Color){ 255, 215, 60, 255 };
         case WEAPON_VENOM_CATACLYSM: return (SDL_Color){ 200, 60, 255, 255 };
+        case WEAPON_SCALD_MAELSTROM: return (SDL_Color){ 120, 230, 255, 255 };
+        case WEAPON_WILDFIRE:        return (SDL_Color){ 255, 130, 40, 255 };
+        case WEAPON_VERDANT_SURGE:   return (SDL_Color){ 70, 230, 160, 255 };
+        case WEAPON_STORM_SURGE:     return (SDL_Color){ 110, 210, 255, 255 };
+        case WEAPON_MAGMA_ERUPTION:  return (SDL_Color){ 255, 80, 20, 255 };
         default:                     return (SDL_Color){ 220, 220, 220, 255 };
     }
 }
 
 bool Weapons_IsEvolved(WeaponType type) {
-    return (type >= WEAPON_SOLAR_FRENZY && type <= WEAPON_VENOM_CATACLYSM);
+    return (type >= WEAPON_SOLAR_FRENZY && type < WEAPON_TYPE_COUNT);
 }
 
 static void Weapons_InitSlot(ActiveWeaponSlot* slot, WeaponType type, int level) {
@@ -232,6 +298,16 @@ static void Weapons_InitSlot(ActiveWeaponSlot* slot, WeaponType type, int level)
             slot->knockback = 60.0f;
             break;
             
+        case WEAPON_ROCK_SLIDE:
+            slot->cooldown = 1.60f - (float)(level - 1) * 0.08f;
+            slot->damage = 28.0f * lvl_m;
+            slot->proj_speed = 300.0f;
+            slot->proj_radius = 18.0f;
+            slot->range = 220.0f;
+            slot->count = 2 + (level - 1);
+            slot->knockback = 320.0f;
+            break;
+
         // EVOLVED WEAPONS (FUSIONS)
         case WEAPON_SOLAR_FRENZY:
             slot->cooldown = 0.65f;
@@ -277,6 +353,53 @@ static void Weapons_InitSlot(ActiveWeaponSlot* slot, WeaponType type, int level)
             slot->pierce = 99;
             slot->knockback = 100.0f;
             break;
+
+        case WEAPON_SCALD_MAELSTROM:
+            slot->cooldown = 0.22f;
+            slot->damage = 26.0f;
+            slot->proj_speed = 260.0f;
+            slot->proj_radius = 18.0f;
+            slot->count = 2;
+            slot->pierce = 3;
+            slot->knockback = 120.0f;
+            break;
+
+        case WEAPON_WILDFIRE:
+            slot->cooldown = 0.55f;
+            slot->damage = 32.0f;
+            slot->proj_speed = 360.0f;
+            slot->proj_radius = 14.0f;
+            slot->count = 4;
+            slot->pierce = 3;
+            slot->knockback = 80.0f;
+            break;
+
+        case WEAPON_VERDANT_SURGE:
+            slot->cooldown = 1.8f;
+            slot->damage = 28.0f;
+            slot->proj_radius = 18.0f;
+            slot->count = 5;
+            slot->knockback = 340.0f;
+            slot->range = 130.0f;
+            break;
+
+        case WEAPON_STORM_SURGE:
+            slot->cooldown = 0.50f;
+            slot->damage = 36.0f;
+            slot->proj_speed = 190.0f;
+            slot->proj_radius = 20.0f;
+            slot->count = 3;
+            slot->knockback = 160.0f;
+            break;
+
+        case WEAPON_MAGMA_ERUPTION:
+            slot->cooldown = 1.2f;
+            slot->damage = 52.0f;
+            slot->proj_speed = 280.0f;
+            slot->proj_radius = 24.0f;
+            slot->count = 3;
+            slot->knockback = 400.0f;
+            break;
             
         default:
             break;
@@ -308,11 +431,14 @@ void Weapons_EvolveWeapon(GameState* game, int slot_a, int slot_b, WeaponType ev
     if (slot_b < 0 || slot_b >= p->weapon_count) return;
     if (slot_a == slot_b) return;
 
-    // Transform slot_a into evolved fusion weapon
-    Weapons_InitSlot(&p->weapons[slot_a], evolved_type, 1);
+    int keep_slot = (slot_a < slot_b) ? slot_a : slot_b;
+    int remove_slot = (slot_a < slot_b) ? slot_b : slot_a;
 
-    // Remove slot_b and shift remaining weapons down (frees up weapon slot!)
-    for (int i = slot_b; i < p->weapon_count - 1; i++) {
+    // Transform keep_slot into evolved fusion weapon
+    Weapons_InitSlot(&p->weapons[keep_slot], evolved_type, 1);
+
+    // Remove the higher index slot and shift down (frees up weapon slot!)
+    for (int i = remove_slot; i < p->weapon_count - 1; i++) {
         p->weapons[i] = p->weapons[i + 1];
     }
     p->weapon_count--;
@@ -833,6 +959,136 @@ void Weapons_FireVenomCataclysm(GameState* game, ActiveWeaponSlot* slot) {
     }
 }
 
+void Weapons_FireRockSlide(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    for (int i = 0; i < slot->count; i++) {
+        float angle = ((float)rand() / (float)RAND_MAX) * 2.0f * (float)M_PI;
+        float dist = 40.0f + ((float)rand() / (float)RAND_MAX) * slot->range;
+        Vec2 drop_target = { p->pos.x + cosf(angle) * dist, p->pos.y + sinf(angle) * dist };
+
+        Projectile* proj = AllocProjectile(game);
+        if (!proj) break;
+        proj->type = PROJ_ROCK_SLIDE;
+        proj->pos = (Vec2){ drop_target.x, drop_target.y - 180.0f }; // Falls from sky
+        proj->vel = (Vec2){ 0.0f, slot->proj_speed };
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = 2;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 180.0f / slot->proj_speed;
+        proj->is_enemy = false;
+        proj->color = (SDL_Color){ 175, 145, 95, 255 };
+    }
+}
+
+void Weapons_FireScaldMaelstrom(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+
+    // 1. Dual superheated steam bubbles
+    for (int i = 0; i < slot->count; i++) {
+        float offset = ((float)rand() / (float)RAND_MAX - 0.5f) * 0.40f;
+        float a = base_a + offset;
+        Projectile* proj = AllocProjectile(game);
+        if (proj) {
+            proj->type = PROJ_SCALD_BUBBLE;
+            proj->color = (SDL_Color){ 120, 230, 255, 240 };
+            proj->pos = p->pos;
+            proj->vel = (Vec2){ cosf(a) * slot->proj_speed, sinf(a) * slot->proj_speed };
+            proj->radius = slot->proj_radius;
+            proj->damage = slot->damage * p->damage_mult;
+            proj->pierce_left = slot->pierce;
+            proj->knockback = slot->knockback;
+            proj->lifetime = 0.0f;
+            proj->max_lifetime = 1.3f;
+            proj->is_enemy = false;
+        }
+    }
+
+    // 2. Continuous superheated scald mist hazard
+    if ((rand() % 3) == 0) {
+        Weapons_SpawnGroundHazard(game, HAZARD_SCALD_MIST, p->pos, 42.0f, 3.0f, 18.0f * p->damage_mult, false, (SDL_Color){ 160, 230, 255, 180 });
+    }
+}
+
+void Weapons_FireWildfire(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+
+    for (int i = 0; i < slot->count; i++) {
+        float offset = ((float)i - (float)(slot->count - 1) * 0.5f) * 0.20f;
+        float leaf_a = base_a + offset;
+        Projectile* proj = AllocProjectile(game);
+        if (!proj) break;
+        proj->type = PROJ_RAZOR_LEAF;
+        proj->color = (SDL_Color){ 255, 130, 30, 255 }; // Fiery blazing orange
+        proj->pos = p->pos;
+        proj->vel = (Vec2){ cosf(leaf_a) * slot->proj_speed, sinf(leaf_a) * slot->proj_speed };
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = slot->pierce;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 1.2f;
+        proj->is_enemy = false;
+    }
+}
+
+void Weapons_FireVerdantSurge(GameState* game, ActiveWeaponSlot* slot) {
+    // Lotus petals handled via orbiter update (siphons HP on contact)
+}
+
+void Weapons_FireStormSurge(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    Vec2 dir = p->aim_dir;
+    float base_a = atan2f(dir.y, dir.x);
+
+    for (int i = 0; i < slot->count; i++) {
+        float offset = ((float)rand() / (float)RAND_MAX - 0.5f) * 0.45f;
+        float a = base_a + offset;
+        Projectile* proj = AllocProjectile(game);
+        if (proj) {
+            proj->type = PROJ_BUBBLE;
+            proj->color = (SDL_Color){ 255, 240, 100, 240 }; // Electric yellow bubble
+            proj->pos = p->pos;
+            proj->vel = (Vec2){ cosf(a) * slot->proj_speed, sinf(a) * slot->proj_speed };
+            proj->radius = slot->proj_radius;
+            proj->damage = slot->damage * p->damage_mult;
+            proj->pierce_left = 1;
+            proj->knockback = slot->knockback;
+            proj->lifetime = 0.0f;
+            proj->max_lifetime = 1.5f;
+            proj->is_enemy = false;
+        }
+    }
+}
+
+void Weapons_FireMagmaEruption(GameState* game, ActiveWeaponSlot* slot) {
+    Player* p = &game->player;
+    for (int i = 0; i < slot->count; i++) {
+        float angle = ((float)rand() / (float)RAND_MAX) * 2.0f * (float)M_PI;
+        float dist = 50.0f + ((float)rand() / (float)RAND_MAX) * 180.0f;
+        Vec2 drop_target = { p->pos.x + cosf(angle) * dist, p->pos.y + sinf(angle) * dist };
+
+        Projectile* proj = AllocProjectile(game);
+        if (!proj) break;
+        proj->type = PROJ_ROCK_SLIDE;
+        proj->pos = (Vec2){ drop_target.x, drop_target.y - 190.0f };
+        proj->vel = (Vec2){ 0.0f, slot->proj_speed };
+        proj->radius = slot->proj_radius;
+        proj->damage = slot->damage * p->damage_mult;
+        proj->pierce_left = 3;
+        proj->knockback = slot->knockback;
+        proj->lifetime = 0.0f;
+        proj->max_lifetime = 190.0f / slot->proj_speed;
+        proj->is_enemy = false;
+        proj->color = (SDL_Color){ 255, 60, 20, 255 }; // Molten magma rock
+    }
+}
+
 void Weapons_FireSlot(GameState* game, ActiveWeaponSlot* slot) {
     switch (slot->type) {
         case WEAPON_VINE_WHIP:       Weapons_FireVineWhip(game, slot); break;
@@ -842,11 +1098,17 @@ void Weapons_FireSlot(GameState* game, ActiveWeaponSlot* slot) {
         case WEAPON_SWIFT:           Weapons_FireSwift(game, slot); break;
         case WEAPON_THUNDER_SHOCK:   Weapons_FireThunderShock(game, slot); break;
         case WEAPON_TOXIC_SPORE:     Weapons_FireToxicSpore(game, slot); break;
+        case WEAPON_ROCK_SLIDE:      Weapons_FireRockSlide(game, slot); break;
         case WEAPON_SOLAR_FRENZY:    Weapons_FireSolarFrenzy(game, slot); break;
         case WEAPON_FIRE_BLAST:      Weapons_FireFireBlast(game, slot); break;
         case WEAPON_HYDRO_VORTEX:    Weapons_FireHydroVortex(game, slot); break;
         case WEAPON_PLASMA_TEMPEST:  Weapons_FirePlasmaTempest(game, slot); break;
         case WEAPON_VENOM_CATACLYSM: Weapons_FireVenomCataclysm(game, slot); break;
+        case WEAPON_SCALD_MAELSTROM: Weapons_FireScaldMaelstrom(game, slot); break;
+        case WEAPON_WILDFIRE:        Weapons_FireWildfire(game, slot); break;
+        case WEAPON_VERDANT_SURGE:   Weapons_FireVerdantSurge(game, slot); break;
+        case WEAPON_STORM_SURGE:     Weapons_FireStormSurge(game, slot); break;
+        case WEAPON_MAGMA_ERUPTION:  Weapons_FireMagmaEruption(game, slot); break;
         default: break;
     }
 }
@@ -936,7 +1198,7 @@ void Weapons_Update(GameState* game, float dt) {
     for (int i = 0; i < player->weapon_count; i++) {
         WeaponType wt = player->weapons[i].type;
         if (wt == WEAPON_PETAL_DANCE || wt == WEAPON_FIRE_SPIN || wt == WEAPON_AQUA_ORBS ||
-            wt == WEAPON_SOLAR_FRENZY || wt == WEAPON_HYDRO_VORTEX) {
+            wt == WEAPON_SOLAR_FRENZY || wt == WEAPON_HYDRO_VORTEX || wt == WEAPON_VERDANT_SURGE) {
             orb_slot = &player->weapons[i];
             break;
         }
@@ -981,6 +1243,11 @@ void Weapons_Update(GameState* game, float dt) {
             orb_dmg = 34.0f;
             cur_rad = 110.0f;
             orb_col = (SDL_Color){ 40, 220, 255, 255 };
+        } else if (orb_slot->type == WEAPON_VERDANT_SURGE) {
+            orb_count = 6;
+            orb_dmg = 30.0f;
+            cur_rad = 120.0f;
+            orb_col = (SDL_Color){ 70, 230, 160, 255 };
         }
     }
 
@@ -1029,10 +1296,18 @@ void Weapons_Update(GameState* game, float dt) {
         
         p->lifetime += dt;
         if (p->lifetime >= p->max_lifetime || p->pierce_left <= 0) {
-            if (p->type == PROJ_EMBER && (rand() % 100) < 30) {
+            if (p->type == PROJ_POKEBALL && p->pierce_left > 0) {
+                // Missed throw! Refund Poké Ball so player isn't penalized for missing
+                player->pokeball_count++;
+                if (player->pokeball_count > 2) player->pokeball_count = 2;
+                snprintf(game->route_banner_text, sizeof(game->route_banner_text), "MISSED THROW! POKÉ BALL RETRIEVED!");
+                game->route_banner_timer = 2.0f;
+            } else if (p->type == PROJ_EMBER && (rand() % 100) < 30) {
                 Weapons_SpawnGroundHazard(game, HAZARD_FIRE_SCORCH, p->pos, 24.0f, 1.2f, 4.5f * player->damage_mult, false, (SDL_Color){ 255, 120, 20, 255 });
             } else if (p->type == PROJ_FIRE_BLAST) {
                 Weapons_SpawnGroundHazard(game, HAZARD_LAVA_POOL, p->pos, 85.0f, 3.2f, 18.0f * player->damage_mult, false, (SDL_Color){ 255, 60, 20, 255 });
+            } else if (p->type == PROJ_SCALD_BUBBLE) {
+                Weapons_SpawnGroundHazard(game, HAZARD_SCALD_MIST, p->pos, 42.0f, 2.5f, 15.0f * player->damage_mult, false, (SDL_Color){ 140, 230, 255, 180 });
             }
             p->active = false;
             continue;
@@ -1475,6 +1750,29 @@ void Weapons_DrawGroundHazards(GameState* game) {
                 SDL_SetTextureAlphaMod(s_glow_texture, (Uint8)(alpha * 220.0f));
                 SDL_RenderCopy(renderer, s_glow_texture, NULL, &inner);
             }
+        } else if (gh->type == HAZARD_SCALD_MIST) {
+            // Boiling scalding steam geyser (Scald Maelstrom)
+            if (s_glow_texture) {
+                int lr = (int)(hr * 1.35f);
+                SDL_Rect halo = { hx - lr, hy - lr, lr * 2, lr * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 130, 230, 255);
+                SDL_SetTextureAlphaMod(s_glow_texture, (Uint8)(alpha * 160.0f));
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+
+                int ir = (int)(hr * 0.75f);
+                SDL_Rect inner = { hx - ir, hy - ir, ir * 2, ir * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 255, 255, 255);
+                SDL_SetTextureAlphaMod(s_glow_texture, (Uint8)(alpha * 210.0f));
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &inner);
+            }
+            for (int b = 0; b < 4; b++) {
+                float ba = (float)b * 1.57f + gh->timer * 6.0f;
+                int bx = hx + (int)(cosf(ba) * hr * 0.45f);
+                int by = hy + (int)(sinf(ba) * hr * 0.45f) - (int)(gh->timer * 15.0f) % 22;
+                SDL_Rect mist_dot = { bx - 2, by - 2, 4, 4 };
+                SDL_SetRenderDrawColor(renderer, 240, 250, 255, 230);
+                SDL_RenderFillRect(renderer, &mist_dot);
+            }
         }
     }
 }
@@ -1827,6 +2125,71 @@ void Weapons_Draw(GameState* game) {
                 SDL_RenderDrawLine(renderer, sx, sy, ex, ey);
                 SDL_RenderDrawLine(renderer, sx + 1, sy, ex + 1, ey);
             }
+        } else if (p->type == PROJ_POKEBALL) {
+            // Thrown Poké Ball capture device: classic red-and-white spherical capsule!
+            // Red top half
+            SDL_SetRenderDrawColor(renderer, 240, 35, 35, 255);
+            for (int dy = -r; dy <= 0; dy++) {
+                int dx_max = (int)sqrtf((float)(r * r - dy * dy));
+                SDL_RenderDrawLine(renderer, sx - dx_max, sy + dy, sx + dx_max, sy + dy);
+            }
+            // White bottom half
+            SDL_SetRenderDrawColor(renderer, 245, 245, 245, 255);
+            for (int dy = 1; dy <= r; dy++) {
+                int dx_max = (int)sqrtf((float)(r * r - dy * dy));
+                SDL_RenderDrawLine(renderer, sx - dx_max, sy + dy, sx + dx_max, sy + dy);
+            }
+            // Black middle dividing belt line
+            SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
+            SDL_RenderDrawLine(renderer, sx - r, sy, sx + r, sy);
+            SDL_RenderDrawLine(renderer, sx - r, sy - 1, sx + r, sy - 1);
+            // Center release button (white circle with dark ring)
+            int btn_r = (r >= 6) ? 3 : 2;
+            SDL_SetRenderDrawColor(renderer, 25, 25, 25, 255);
+            SDL_Rect b_border = { sx - btn_r - 1, sy - btn_r - 1, (btn_r + 1) * 2, (btn_r + 1) * 2 };
+            SDL_RenderFillRect(renderer, &b_border);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_Rect b_core = { sx - btn_r, sy - btn_r, btn_r * 2, btn_r * 2 };
+            SDL_RenderFillRect(renderer, &b_core);
+            if (s_glow_texture) {
+                SDL_Rect halo = { sx - r - 2, sy - r - 2, (r + 2) * 2, (r + 2) * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 255, 200, 200);
+                SDL_SetTextureAlphaMod(s_glow_texture, 110);
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+            }
+        } else if (p->type == PROJ_ROCK_SLIDE) {
+            // Tumbling crushing boulder: craggy polygonal stone
+            SDL_SetRenderDrawColor(renderer, p->color.r, p->color.g, p->color.b, 255);
+            SDL_Rect b_stone = { sx - r, sy - r, r * 2, r * 2 };
+            SDL_RenderFillRect(renderer, &b_stone);
+            SDL_SetRenderDrawColor(renderer, p->color.r * 2 / 3, p->color.g * 2 / 3, p->color.b * 2 / 3, 255);
+            SDL_RenderDrawLine(renderer, sx - r / 2, sy - r, sx + r / 2, sy + r);
+            SDL_RenderDrawLine(renderer, sx - r, sy + r / 3, sx + r, sy - r / 3);
+            if (s_glow_texture && p->color.r > 200) {
+                int hr = (int)(r * 1.4f);
+                SDL_Rect halo = { sx - hr, sy - hr, hr * 2, hr * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 255, 80, 20);
+                SDL_SetTextureAlphaMod(s_glow_texture, 160);
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+            }
+        } else if (p->type == PROJ_SCALD_BUBBLE) {
+            // Superheated steam bubble
+            if (s_glow_texture) {
+                int hr = (int)(r * 1.5f);
+                SDL_Rect halo = { sx - hr, sy - hr, hr * 2, hr * 2 };
+                SDL_SetTextureColorMod(s_glow_texture, 120, 230, 255);
+                SDL_SetTextureAlphaMod(s_glow_texture, 140);
+                SDL_RenderCopy(renderer, s_glow_texture, NULL, &halo);
+            }
+            if (s_orb_texture) {
+                SDL_Rect body = { sx - r, sy - r, r * 2, r * 2 };
+                SDL_SetTextureColorMod(s_orb_texture, 100, 220, 255);
+                SDL_SetTextureAlphaMod(s_orb_texture, 160);
+                SDL_RenderCopy(renderer, s_orb_texture, NULL, &body);
+            }
+            SDL_SetRenderDrawColor(renderer, 240, 255, 255, 240);
+            SDL_Rect gleam = { sx - r / 2, sy - r / 2, r / 2, r / 2 };
+            SDL_RenderFillRect(renderer, &gleam);
         } else if (p->type == PROJ_SLASH) {
             // Thick, Sweeping Energy Crescent Blade (Vine Whip / Dragon Breath / Aqua Jet)
             float progress = p->lifetime / p->max_lifetime;

@@ -155,6 +155,17 @@ static void SpawnGem(GameState* game, Vec2 pos, int value) {
     }
 }
 
+bool Party_HasType(const GameState* game, PokeType type) {
+    if (type == POKE_TYPE_NONE || type == POKE_TYPE_NORMAL) return true;
+    for (int i = 0; i < game->party_count; i++) {
+        if (!game->party[i].active) continue;
+        if (game->party[i].type1 == type || game->party[i].type2 == type) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void Game_GenerateLevelUpCards(GameState* game) {
     Player* p = &game->player;
     StarterID s = p->starter;
@@ -201,10 +212,17 @@ void Game_GenerateLevelUpCards(GameState* game) {
         c->color = Weapons_GetColor(w->type);
     }
 
-    // 3. New Weapons from pool (if player has open weapon slots < MAX_ACTIVE_WEAPONS)
+    // 3. New Weapons from pool (Restricted strictly by elemental types present in the Player's Party!)
     if (p->weapon_count < MAX_ACTIVE_WEAPONS) {
-        for (int t = WEAPON_VINE_WHIP; t <= WEAPON_TOXIC_SPORE && cand_count < 32; t++) {
+        for (int t = WEAPON_VINE_WHIP; t <= WEAPON_ROCK_SLIDE && cand_count < 32; t++) {
             WeaponType wtype = (WeaponType)t;
+            PokeType elem = Weapons_GetType(wtype);
+            // CRITICAL ELEMENTAL RESTRICTION: Bulbasaur cannot roll water, Charmander cannot roll grass,
+            // unless a Pokemon of that type has been caught and added to the player's team!
+            if (elem != POKE_TYPE_NONE && elem != POKE_TYPE_NORMAL && !Party_HasType(game, elem)) {
+                continue;
+            }
+
             bool already_owned = false;
             for (int i = 0; i < p->weapon_count; i++) {
                 if (p->weapons[i].type == wtype) { already_owned = true; break; }
@@ -218,7 +236,7 @@ void Game_GenerateLevelUpCards(GameState* game) {
             c->slot_ingredient_b = -1;
             snprintf(c->title, 31, "%s", Weapons_GetName(wtype));
             strncpy(c->desc, Weapons_GetDescription(wtype), 95);
-            strncpy(c->tag, "NEW WEAPON", 15);
+            snprintf(c->tag, 15, "[%s]", Pokedex_GetTypeName(elem));
             c->color = Weapons_GetColor(wtype);
         }
     }
@@ -381,6 +399,241 @@ void Game_ApplyLevelUpChoice(GameState* game, int card_index) {
     game->paused = false;
 }
 
+void Game_ThrowPokeball(GameState* game) {
+    if (game->app_state != APP_STATE_PLAYING) return;
+    Player* p = &game->player;
+    if (p->pokeball_count <= 0) {
+        snprintf(game->route_banner_text, sizeof(game->route_banner_text), "NO POKÉ BALLS! EARN MORE FROM ROUTE/GYM CLEARS!");
+        game->route_banner_timer = 2.5f;
+        return;
+    }
+    if (game->party_count >= MAX_PARTY_MEMBERS) {
+        snprintf(game->route_banner_text, sizeof(game->route_banner_text), "PARTY FULL (MAX 3)! CANNOT CATCH MORE POKÉMON!");
+        game->route_banner_timer = 2.5f;
+        return;
+    }
+
+    // Determine throw direction towards mouse cursor or aim direction
+    Vec2 aim = p->aim_dir;
+    float throw_dist = 220.0f;
+    if (game->mouse_active) {
+        float mdx = game->mouse_pos.x - p->pos.x;
+        float mdy = game->mouse_pos.y - p->pos.y;
+        float mdist = sqrtf(mdx * mdx + mdy * mdy);
+        if (mdist > 10.0f) {
+            aim = (Vec2){ mdx / mdist, mdy / mdist };
+            throw_dist = (mdist > 300.0f) ? 300.0f : mdist;
+        }
+    }
+
+    // Spawn Poké Ball projectile
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        Projectile* proj = &game->projectiles[i];
+        if (!proj->active) {
+            proj->active = true;
+            proj->type = PROJ_POKEBALL;
+            proj->pos = p->pos;
+            proj->vel = (Vec2){ aim.x * 420.0f, aim.y * 420.0f };
+            proj->radius = 9.0f;
+            proj->damage = 0.0f;
+            proj->lifetime = 0.0f;
+            proj->max_lifetime = throw_dist / 420.0f;
+            proj->pierce_left = 1;
+            proj->knockback = 0.0f;
+            proj->is_enemy = false;
+            proj->color = (SDL_Color){ 255, 45, 45, 255 };
+
+            p->pokeball_count--;
+            snprintf(game->route_banner_text, sizeof(game->route_banner_text), "THREW POKÉ BALL!");
+            game->route_banner_timer = 1.2f;
+            break;
+        }
+    }
+}
+
+void Party_Update(GameState* game, float dt) {
+    Player* p = &game->player;
+    if (game->party_count <= 1) return;
+
+    for (int i = 1; i < game->party_count; i++) {
+        PartyMember* m = &game->party[i];
+        if (!m->active) continue;
+
+        // Smooth formation trailing behind player facing
+        float follow_dist = 42.0f;
+        float base_angle = atan2f(p->aim_dir.y, p->aim_dir.x) + (float)M_PI;
+        float anchor_angle = base_angle + m->follow_angle_offset;
+        Vec2 target_pos = {
+            p->pos.x + cosf(anchor_angle) * follow_dist,
+            p->pos.y + sinf(anchor_angle) * follow_dist
+        };
+
+        float dx = target_pos.x - m->pos.x;
+        float dy = target_pos.y - m->pos.y;
+        float dist = sqrtf(dx * dx + dy * dy);
+        if (dist > 350.0f) {
+            m->pos = target_pos;
+            m->vel = (Vec2){ 0.0f, 0.0f };
+        } else {
+            float speed_factor = 7.5f;
+            m->vel.x = dx * speed_factor;
+            m->vel.y = dy * speed_factor;
+            float vlen = sqrtf(m->vel.x * m->vel.x + m->vel.y * m->vel.y);
+            float max_v = p->speed * 1.35f;
+            if (vlen > max_v && vlen > 0.001f) {
+                m->vel.x = (m->vel.x / vlen) * max_v;
+                m->vel.y = (m->vel.y / vlen) * max_v;
+            }
+            m->pos.x += m->vel.x * dt;
+            m->pos.y += m->vel.y * dt;
+        }
+
+        // Animation update
+        float move_spd = sqrtf(m->vel.x * m->vel.x + m->vel.y * m->vel.y);
+        m->anim.is_moving = (move_spd > 15.0f);
+        if (m->anim.is_moving) {
+            m->anim.anim_timer += dt;
+            if (m->anim.anim_timer >= 0.12f) {
+                m->anim.anim_timer = 0.0f;
+                m->anim.current_frame = (m->anim.current_frame + 1) % 4;
+            }
+            if (fabsf(m->vel.x) > fabsf(m->vel.y)) {
+                m->anim.direction = (m->vel.x > 0) ? 2 : 1;
+            } else {
+                m->anim.direction = (m->vel.y > 0) ? 0 : 3;
+            }
+        }
+
+        // Autonomous companion basic attacks every ~2.5s
+        m->attack_timer -= dt;
+        if (m->attack_timer <= 0.0f) {
+            float closest_dist = 300.0f;
+            Vec2 foe_dir = { 0.0f, 0.0f };
+            bool found_foe = false;
+            for (int k = 0; k < game->active_enemy_count; k++) {
+                int e_idx = game->active_enemy_indices[k];
+                Enemy* e = &game->enemies[e_idx];
+                if (!e->active) continue;
+                float edx = e->pos.x - m->pos.x;
+                float edy = e->pos.y - m->pos.y;
+                float edist = sqrtf(edx * edx + edy * edy);
+                if (edist < closest_dist && edist > 0.001f) {
+                    closest_dist = edist;
+                    foe_dir = (Vec2){ edx / edist, edy / edist };
+                    found_foe = true;
+                }
+            }
+
+            if (found_foe) {
+                m->attack_timer = m->attack_cooldown;
+                ProjectileType ptype = PROJ_SWIFT_STAR;
+                SDL_Color pcol = { 255, 230, 80, 255 };
+                float pspd = 280.0f;
+                float pdmg = 15.0f * p->damage_mult;
+                int ppierce = 1;
+
+                if (m->type1 == POKE_TYPE_WATER || m->type2 == POKE_TYPE_WATER) {
+                    ptype = PROJ_BUBBLE;
+                    pcol = (SDL_Color){ 80, 210, 255, 255 };
+                    pspd = 220.0f;
+                } else if (m->type1 == POKE_TYPE_FIRE || m->type2 == POKE_TYPE_FIRE) {
+                    ptype = PROJ_EMBER;
+                    pcol = (SDL_Color){ 255, 120, 30, 255 };
+                    pspd = 300.0f;
+                } else if (m->type1 == POKE_TYPE_GRASS || m->type2 == POKE_TYPE_GRASS) {
+                    ptype = PROJ_RAZOR_LEAF;
+                    pcol = (SDL_Color){ 100, 235, 70, 255 };
+                    pspd = 320.0f;
+                    ppierce = 2;
+                } else if (m->type1 == POKE_TYPE_ELECTRIC || m->type2 == POKE_TYPE_ELECTRIC) {
+                    ptype = PROJ_LIGHTNING_BOLT;
+                    pcol = (SDL_Color){ 255, 240, 80, 255 };
+                    pdmg = 22.0f * p->damage_mult;
+                } else if (m->type1 == POKE_TYPE_ROCK || m->type2 == POKE_TYPE_ROCK ||
+                           m->type1 == POKE_TYPE_GROUND || m->type2 == POKE_TYPE_GROUND) {
+                    ptype = PROJ_ROCK_SLIDE;
+                    pcol = (SDL_Color){ 175, 145, 95, 255 };
+                    pdmg = 20.0f * p->damage_mult;
+                }
+
+                for (int j = 0; j < MAX_PROJECTILES; j++) {
+                    Projectile* proj = &game->projectiles[j];
+                    if (!proj->active) {
+                        proj->active = true;
+                        proj->type = ptype;
+                        proj->pos = m->pos;
+                        proj->vel = (Vec2){ foe_dir.x * pspd, foe_dir.y * pspd };
+                        proj->radius = 12.0f;
+                        proj->damage = pdmg;
+                        proj->lifetime = 0.0f;
+                        proj->max_lifetime = 1.2f;
+                        proj->pierce_left = ppierce;
+                        proj->knockback = 70.0f;
+                        proj->is_enemy = false;
+                        proj->color = pcol;
+                        break;
+                    }
+                }
+            } else {
+                m->attack_timer = 0.4f;
+            }
+        }
+    }
+}
+
+void Party_Draw(GameState* game) {
+    SDL_Renderer* renderer = game->renderer;
+    Vec2 camera = game->camera;
+    float time_sec = game->spawner.game_time;
+
+    for (int i = 1; i < game->party_count; i++) {
+        PartyMember* m = &game->party[i];
+        if (!m->active) continue;
+
+        int screen_x = (int)(m->pos.x - camera.x);
+        int screen_y = (int)(m->pos.y - camera.y);
+
+        // 1. Friendly pulsating green aura beneath feet
+        float pulse = 0.8f + 0.2f * sinf(time_sec * 5.0f + (float)i * 1.5f);
+        int aura_r = (int)(20.0f * pulse);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 50, 240, 110, (Uint8)(100 * pulse));
+        for (int r = aura_r - 2; r <= aura_r; r++) {
+            for (int a = 0; a < 24; a++) {
+                float a1 = (2.0f * (float)M_PI * a) / 24.0f;
+                float a2 = (2.0f * (float)M_PI * (a + 1)) / 24.0f;
+                SDL_RenderDrawLine(renderer, screen_x + (int)(cosf(a1)*r), screen_y + (int)(sinf(a1)*r),
+                                             screen_x + (int)(cosf(a2)*r), screen_y + (int)(sinf(a2)*r));
+            }
+        }
+
+        // 2. Green Outline Silhouette: draw shifted by 1.5px with green color mod!
+        if (m->sprite.loaded && m->sprite.texture) {
+            SDL_SetTextureColorMod(m->sprite.texture, 40, 255, 90);
+            Vec2 offsets[4] = {
+                { m->pos.x - 1.5f, m->pos.y },
+                { m->pos.x + 1.5f, m->pos.y },
+                { m->pos.x, m->pos.y - 1.5f },
+                { m->pos.x, m->pos.y + 1.5f }
+            };
+            for (int o = 0; o < 4; o++) {
+                Sprite_Draw(renderer, &m->sprite, &m->anim, offsets[o], camera, (SDL_Color){ 40, 255, 90, 255 }, 16.0f, false);
+            }
+            // Draw regular sprite on top
+            SDL_SetTextureColorMod(m->sprite.texture, 255, 255, 255);
+            Sprite_Draw(renderer, &m->sprite, &m->anim, m->pos, camera, (SDL_Color){ 255, 255, 255, 255 }, 16.0f, false);
+        } else {
+            Sprite_DrawProceduralFallback(renderer, m->pos, camera, 16.0f, m->anim.direction, (SDL_Color){ 50, 240, 110, 255 }, false);
+        }
+
+        // 3. Ally Name Tag Above Head
+        char tag_str[48];
+        snprintf(tag_str, sizeof(tag_str), "%s [%s]", m->name, Pokedex_GetTypeName(m->type1));
+        int tag_w = (int)strlen(tag_str) * 6;
+        Font_DrawTextShadow(renderer, game->font_texture, tag_str, screen_x - tag_w / 2, screen_y - 28, 1, (SDL_Color){ 100, 255, 150, 255 });
+    }
+}
+
 void Game_SelectStarter(GameState* game, StarterID starter) {
     Player* p = &game->player;
     p->starter = starter;
@@ -459,6 +712,28 @@ void Game_SelectStarter(GameState* game, StarterID starter) {
     for (int i = 0; i < MAX_VINE_STRIKES; i++) game->vine_strikes[i].active = false;
     for (int i = 0; i < MAX_GEMS; i++) game->gems[i].active = false;
     for (int i = 0; i < MAX_PARTICLES; i++) game->damage_texts[i].active = false;
+
+    // Poké Ball Inventory: Starts with 1 Poké Ball to make smart team-building decisions
+    p->pokeball_count = 1;
+
+    // Initialize Party Member 0 (Starter)
+    game->party_count = 1;
+    memset(game->party, 0, sizeof(game->party));
+    PartyMember* sm = &game->party[0];
+    sm->active = true;
+    int pid = (starter == STARTER_BULBASAUR) ? 1 : ((starter == STARTER_CHARMANDER) ? 4 : 7);
+    sm->pokedex_id = pid;
+    const PokedexEntry* s_entry = Pokedex_GetEntry(pid);
+    if (s_entry) {
+        strncpy(sm->name, s_entry->name, sizeof(sm->name) - 1);
+        sm->type1 = s_entry->type1;
+        sm->type2 = s_entry->type2;
+        sm->sprite_scale = s_entry->scale * 1.1f;
+    }
+    sm->pos = p->pos;
+    sm->vel = (Vec2){ 0.0f, 0.0f };
+    sm->sprite = p->sprite;
+    sm->anim = p->anim;
 
     // Configure strictly ONE basic attack!
     Weapons_InitForStarter(game, starter);
@@ -555,6 +830,12 @@ void Game_HandleEvent(GameState* game, const SDL_Event* event) {
             game->mouse_active = true;
             game->mouse_pos = (Vec2){ (float)event->motion.x + game->camera.x,
                                       (float)event->motion.y + game->camera.y };
+        } else if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_RIGHT) {
+            Game_ThrowPokeball(game);
+        } else if (event->type == SDL_KEYDOWN) {
+            if (event->key.keysym.sym == SDLK_e || event->key.keysym.sym == SDLK_c) {
+                Game_ThrowPokeball(game);
+            }
         }
     } else if (game->app_state == APP_STATE_STARTER_SELECT) {
         if (event->type == SDL_MOUSEMOTION) {
@@ -825,6 +1106,9 @@ void Game_Update(GameState* game, float dt) {
     }
     
     game->profiler.t_player = Profiler_ElapsedMs(t_p_start);
+
+    // Update Party Companions (follower physics & autonomous attacks)
+    Party_Update(game, dt);
 
     // -------------------------------------------------------------
     // PHASE 3: WEAPONS UPDATE
@@ -1229,6 +1513,60 @@ void Game_Update(GameState* game, float dt) {
             float hit_dist = proj->radius + e->radius;
             
             if (dx * dx + dy * dy <= hit_dist * hit_dist) {
+                // SPECIAL PROJECTILE: POKÉ BALL CAPTURE MECHANIC
+                if (proj->type == PROJ_POKEBALL) {
+                    if (game->enemy_types[e->type].is_boss) {
+                        snprintf(game->route_banner_text, sizeof(game->route_banner_text), "GYM LEADER POKEMON CANNOT BE CAPTURED!");
+                        game->route_banner_timer = 2.5f;
+                        p->pokeball_count++; // Refund ball
+                        proj->active = false;
+                        break;
+                    }
+                    if (e->hp > e->max_hp * 0.40f && !e->is_trapped) {
+                        char escape_msg[64];
+                        snprintf(escape_msg, sizeof(escape_msg), "WILD %s BROKE FREE! (WEAKEN TO <40%% HP)", game->enemy_types[e->type].name);
+                        snprintf(game->route_banner_text, sizeof(game->route_banner_text), "%s", escape_msg);
+                        game->route_banner_timer = 3.0f;
+                        Weapons_SpawnDamageText(game, e->pos, 0.0f, (SDL_Color){ 220, 220, 220, 255 });
+                        proj->active = false;
+                        break;
+                    }
+
+                    // CAPTURE SUCCESS! Add to party
+                    int pid = game->enemy_types[e->type].pokedex_id;
+                    const PokedexEntry* entry = Pokedex_GetEntry(pid);
+                    if (entry && game->party_count < MAX_PARTY_MEMBERS) {
+                        int slot = game->party_count;
+                        PartyMember* m = &game->party[slot];
+                        m->active = true;
+                        m->pokedex_id = pid;
+                        strncpy(m->name, entry->name, sizeof(m->name) - 1);
+                        m->name[sizeof(m->name) - 1] = '\0';
+                        m->type1 = entry->type1;
+                        m->type2 = entry->type2;
+                        m->pos = e->pos;
+                        m->vel = (Vec2){ 0.0f, 0.0f };
+                        m->sprite_scale = entry->scale * 1.05f;
+                        m->sprite = Pokedex_LoadSprite(game->renderer, pid, m->sprite_scale);
+                        m->anim = (AnimState){ 0, 0, 0.0f, false };
+                        m->attack_cooldown = 2.5f;
+                        m->attack_timer = 0.8f;
+                        m->follow_angle_offset = (slot == 1) ? 2.3f : -2.3f;
+                        game->party_count++;
+
+                        char caught_msg[64];
+                        const char* t1_str = Pokedex_GetTypeName(entry->type1);
+                        snprintf(caught_msg, sizeof(caught_msg), "GOTCHA! CAUGHT %s! [%s] ATTACKS UNLOCKED!", entry->name, t1_str);
+                        snprintf(game->route_banner_text, sizeof(game->route_banner_text), "%s", caught_msg);
+                        game->route_banner_timer = 4.0f;
+
+                        // Despawn wild enemy
+                        Game_DeactivateEnemy(game, e_idx);
+                    }
+                    proj->active = false;
+                    break;
+                }
+
                 // Apply Damage
                 float dmg = proj->damage;
                 if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_STATIONARY) {
@@ -1261,6 +1599,17 @@ void Game_Update(GameState* game, float dt) {
                     Weapons_SpawnGroundHazard(game, HAZARD_LAVA_POOL, e->pos, 85.0f, 3.2f, 18.0f * p->damage_mult, false, (SDL_Color){ 255, 60, 20, 255 });
                 }
 
+                // If Scald Bubble strikes, trap enemy in boiling mist and spawn scald geyser!
+                if (proj->type == PROJ_SCALD_BUBBLE) {
+                    if (!e->is_trapped) {
+                        e->is_trapped = true;
+                        e->trap_timer = 0.0f;
+                        e->trap_duration = 1.4f;
+                        e->trap_drift_vel = (Vec2){ proj->vel.x * 0.15f, -20.0f };
+                    }
+                    Weapons_SpawnGroundHazard(game, HAZARD_SCALD_MIST, e->pos, 42.0f, 2.5f, 15.0f * p->damage_mult, false, (SDL_Color){ 140, 230, 255, 180 });
+                }
+
                 // If Swift Star with Plasma Tempest strikes, trigger chain lightning
                 if (proj->type == PROJ_SWIFT_STAR) {
                     for (int w = 0; w < p->weapon_count; w++) {
@@ -1287,28 +1636,70 @@ void Game_Update(GameState* game, float dt) {
                     }
                 }
 
-                // If Razor Leaf with Venom Cataclysm strikes, spawn acid mire!
+                // If Razor Leaf strikes: check for Venom Cataclysm (acid) or Wildfire (scorch)
                 if (proj->type == PROJ_RAZOR_LEAF) {
                     for (int w = 0; w < p->weapon_count; w++) {
                         if (p->weapons[w].type == WEAPON_VENOM_CATACLYSM) {
                             Weapons_SpawnGroundHazard(game, HAZARD_ACID_MIRE, e->pos, 45.0f, 2.5f, 10.0f * p->damage_mult, false, (SDL_Color){ 180, 40, 240, 220 });
                             break;
+                        } else if (p->weapons[w].type == WEAPON_WILDFIRE) {
+                            Weapons_SpawnGroundHazard(game, HAZARD_FIRE_SCORCH, e->pos, 35.0f, 2.0f, 12.0f * p->damage_mult, false, (SDL_Color){ 255, 120, 20, 220 });
+                            break;
                         }
                     }
                 }
 
-                // If Bubble strikes an enemy, trap them in the bubble!
-                if (proj->type == PROJ_BUBBLE && !e->is_trapped) {
-                    e->is_trapped = true;
-                    e->trap_timer = 0.0f;
-                    e->trap_duration = 1.35f;
-                    e->trap_drift_vel = (Vec2){ proj->vel.x * 0.15f, proj->vel.y * 0.15f - 24.0f };
+                // If Bubble strikes: check for Storm Surge (lightning) or normal trap
+                if (proj->type == PROJ_BUBBLE) {
+                    if (!e->is_trapped) {
+                        e->is_trapped = true;
+                        e->trap_timer = 0.0f;
+                        e->trap_duration = 1.35f;
+                        e->trap_drift_vel = (Vec2){ proj->vel.x * 0.15f, proj->vel.y * 0.15f - 24.0f };
+                    }
+                    for (int w = 0; w < p->weapon_count; w++) {
+                        if (p->weapons[w].type == WEAPON_STORM_SURGE) {
+                            // Call down vertical lightning bolt on target!
+                            for (int j = 0; j < MAX_PROJECTILES; j++) {
+                                Projectile* lp = &game->projectiles[j];
+                                if (!lp->active) {
+                                    lp->active = true;
+                                    lp->type = PROJ_LIGHTNING_BOLT;
+                                    lp->pos = e->pos;
+                                    lp->damage = 36.0f * p->damage_mult;
+                                    lp->radius = 30.0f;
+                                    lp->pierce_left = 99;
+                                    lp->knockback = 120.0f;
+                                    lp->lifetime = 0.0f;
+                                    lp->max_lifetime = 0.35f;
+                                    lp->is_enemy = false;
+                                    lp->color = (SDL_Color){ 255, 240, 80, 255 };
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
                 }
 
-                // If Bulbasaur Petal Dance strikes an enemy, siphon life
-                if (proj->type == PROJ_ORBITER && p->starter == STARTER_BULBASAUR) {
-                    if (p->hp < p->max_hp) {
-                        p->hp += 1.0f;
+                // If Rock Slide with Magma Eruption strikes:
+                if (proj->type == PROJ_ROCK_SLIDE) {
+                    for (int w = 0; w < p->weapon_count; w++) {
+                        if (p->weapons[w].type == WEAPON_MAGMA_ERUPTION) {
+                            Weapons_SpawnGroundHazard(game, HAZARD_LAVA_POOL, e->pos, 50.0f, 2.8f, 16.0f * p->damage_mult, false, (SDL_Color){ 255, 60, 20, 220 });
+                            break;
+                        }
+                    }
+                }
+
+                // If Bulbasaur Petal Dance or Verdant Surge strikes an enemy, siphon life
+                if (proj->type == PROJ_ORBITER) {
+                    float heal = (p->starter == STARTER_BULBASAUR) ? 1.0f : 0.0f;
+                    for (int w = 0; w < p->weapon_count; w++) {
+                        if (p->weapons[w].type == WEAPON_VERDANT_SURGE) { heal += 2.0f; break; }
+                    }
+                    if (heal > 0.0f && p->hp < p->max_hp) {
+                        p->hp += heal;
                         if (p->hp > p->max_hp) p->hp = p->max_hp;
                     }
                 }
@@ -1769,7 +2160,19 @@ void Game_Draw(GameState* game) {
             int hy = (int)(by - bubble_r * 0.42f);
             DrawFilledCircle(renderer, hx, hy, (int)(bubble_r * 0.26f), (SDL_Color){ 255, 255, 255, 220 });
         }
+
+        // Catchable indicator if enemy is weakened under 40% HP or trapped in bubble!
+        if ((e->hp <= e->max_hp * 0.40f || e->is_trapped) && !cfg->is_boss) {
+            float pulse = 0.8f + 0.2f * sinf(game->spawner.game_time * 8.0f);
+            int ey_tag = (int)(e->pos.y - camera.y - cfg->radius - 14.0f);
+            int ex_tag = (int)(e->pos.x - camera.x);
+            Font_DrawTextShadow(renderer, game->font_texture, "[E] CATCH", ex_tag - 26, ey_tag, 1, 
+                (SDL_Color){ 255, (Uint8)(220 * pulse), 60, 255 });
+        }
     }
+
+    // 4.5. Draw Party Companions (Followers with friendly green glow & silhouettes)
+    Party_Draw(game);
     
     // 5. Draw Player
     Player* p = &game->player;
@@ -2156,6 +2559,62 @@ void Game_Draw(GameState* game) {
             Font_DrawText(renderer, game->font_texture, "[EMPTY]", wx + 28, btn_y + 6, 1, (SDL_Color){ 90, 105, 120, 200 });
         }
     }
+
+    // -------------------------------------------------------------
+    // HUD: PARTY ROSTER (UP TO 3 POKEMON) & POKÉ BALL INVENTORY
+    // -------------------------------------------------------------
+    int party_x = 810;
+    int party_y = 16;
+    int party_slot_w = 145;
+    int party_slot_h = 36;
+
+    for (int i = 0; i < MAX_PARTY_MEMBERS; i++) {
+        int sx = party_x + i * (party_slot_w + 8);
+        SDL_Rect sr = { sx, party_y, party_slot_w, party_slot_h };
+        if (i < game->party_count && game->party[i].active) {
+            PartyMember* m = &game->party[i];
+            bool is_starter = (i == 0);
+            SDL_Color tcol = Pokedex_GetTypeColor(m->type1);
+            SDL_SetRenderDrawColor(renderer, is_starter ? 20 : 16, is_starter ? 30 : 36, is_starter ? 45 : 24, 235);
+            SDL_RenderFillRect(renderer, &sr);
+            SDL_SetRenderDrawColor(renderer, is_starter ? 80 : 50, is_starter ? 170 : 230, is_starter ? 255 : 120, 220);
+            SDL_RenderDrawRect(renderer, &sr);
+
+            char p_title[32];
+            snprintf(p_title, sizeof(p_title), "%s %s", is_starter ? "*" : "+", m->name);
+            Font_DrawText(renderer, game->font_texture, p_title, sx + 6, party_y + 4, 1, (SDL_Color){ 255, 255, 255, 255 });
+
+            char p_type[32];
+            if (m->type2 != POKE_TYPE_NONE) {
+                snprintf(p_type, sizeof(p_type), "%s / %s", Pokedex_GetTypeName(m->type1), Pokedex_GetTypeName(m->type2));
+            } else {
+                snprintf(p_type, sizeof(p_type), "TYPE: %s", Pokedex_GetTypeName(m->type1));
+            }
+            Font_DrawText(renderer, game->font_texture, p_type, sx + 6, party_y + 20, 1, tcol);
+        } else {
+            SDL_SetRenderDrawColor(renderer, 15, 18, 24, 180);
+            SDL_RenderFillRect(renderer, &sr);
+            SDL_SetRenderDrawColor(renderer, 45, 55, 70, 180);
+            SDL_RenderDrawRect(renderer, &sr);
+            Font_DrawText(renderer, game->font_texture, "[EMPTY PARTY]", sx + 12, party_y + 13, 1, (SDL_Color){ 95, 110, 125, 200 });
+        }
+    }
+
+    // Poké Ball Inventory Box & Capture Prompt
+    int pb_x = 810;
+    int pb_y = 58;
+    int pb_w = 451;
+    int pb_h = 24;
+    SDL_Rect pb_r = { pb_x, pb_y, pb_w, pb_h };
+    SDL_SetRenderDrawColor(renderer, 24, 20, 28, 235);
+    SDL_RenderFillRect(renderer, &pb_r);
+    SDL_SetRenderDrawColor(renderer, 220, 70, 70, 220);
+    SDL_RenderDrawRect(renderer, &pb_r);
+
+    char pb_str[96];
+    snprintf(pb_str, sizeof(pb_str), "POKÉ BALLS: %d/2   [E / R-Click] Throw Ball   (Target HP < 35%%)", p->pokeball_count);
+    Font_DrawText(renderer, game->font_texture, pb_str, pb_x + 10, pb_y + 7, 1, 
+        (p->pokeball_count > 0) ? (SDL_Color){ 255, 225, 90, 255 } : (SDL_Color){ 160, 160, 160, 255 });
 
     // Boss HP Bar (if active gym boss)
     for (int k = 0; k < game->active_enemy_count; k++) {

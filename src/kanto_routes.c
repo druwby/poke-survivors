@@ -258,6 +258,11 @@ void KantoRoutes_AdvanceRoute(GameState* game) {
     }
     game->active_enemy_count = 0;
 
+    // Milestone Reward: Award +1 Poké Ball on route/milestone completion (max 2 held)
+    if (game->player.pokeball_count < 2) {
+        game->player.pokeball_count++;
+    }
+
     int s = game->current_section;
     int r = game->current_route_index;
     r++;

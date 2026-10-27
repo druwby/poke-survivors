@@ -16,6 +16,7 @@ typedef struct {
     float total_damage_taken;
     int dashes_used;
     int special_q_used;
+    int pokemon_caught;
     
     // Route telemetry
     int routes_cleared;
@@ -80,6 +81,7 @@ typedef struct {
     // Ability usage
     float avg_dashes;
     float avg_special_q;
+    float avg_caught;
     
     // Diagnostic alert counters
     int early_deaths;

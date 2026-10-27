@@ -21,6 +21,7 @@ const char* Weapons_GetName(WeaponType type);
 const char* Weapons_GetDescription(WeaponType type);
 SDL_Color Weapons_GetColor(WeaponType type);
 bool Weapons_IsEvolved(WeaponType type);
+PokeType Weapons_GetType(WeaponType type);
 
 // Weapon Lifecycle & Inventory
 void Weapons_Init(WeaponsManager* wm);
@@ -39,6 +40,7 @@ void Weapons_FireRazorLeaf(GameState* game, ActiveWeaponSlot* slot);
 void Weapons_FireSwift(GameState* game, ActiveWeaponSlot* slot);
 void Weapons_FireThunderShock(GameState* game, ActiveWeaponSlot* slot);
 void Weapons_FireToxicSpore(GameState* game, ActiveWeaponSlot* slot);
+void Weapons_FireRockSlide(GameState* game, ActiveWeaponSlot* slot);
 
 // Evolved fusions
 void Weapons_FireSolarFrenzy(GameState* game, ActiveWeaponSlot* slot);
@@ -46,6 +48,11 @@ void Weapons_FireFireBlast(GameState* game, ActiveWeaponSlot* slot);
 void Weapons_FireHydroVortex(GameState* game, ActiveWeaponSlot* slot);
 void Weapons_FirePlasmaTempest(GameState* game, ActiveWeaponSlot* slot);
 void Weapons_FireVenomCataclysm(GameState* game, ActiveWeaponSlot* slot);
+void Weapons_FireScaldMaelstrom(GameState* game, ActiveWeaponSlot* slot);
+void Weapons_FireWildfire(GameState* game, ActiveWeaponSlot* slot);
+void Weapons_FireVerdantSurge(GameState* game, ActiveWeaponSlot* slot);
+void Weapons_FireStormSurge(GameState* game, ActiveWeaponSlot* slot);
+void Weapons_FireMagmaEruption(GameState* game, ActiveWeaponSlot* slot);
 
 // Legacy stubs (for dev menu or existing calls)
 void Weapons_FireWaterWand(GameState* game);

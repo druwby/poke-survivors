@@ -15,5 +15,9 @@ void Game_DeactivateEnemy(GameState* game, int e_idx);
 void Game_SelectStarter(GameState* game, StarterID starter);
 void Game_GenerateLevelUpCards(GameState* game);
 void Game_ApplyLevelUpChoice(GameState* game, int card_index);
+void Game_ThrowPokeball(GameState* game);
+bool Party_HasType(const GameState* game, PokeType type);
+void Party_Update(GameState* game, float dt);
+void Party_Draw(GameState* game);
 
 #endif // GAME_H
