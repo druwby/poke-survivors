@@ -122,6 +122,9 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
     snprintf(game->route_banner_text, sizeof(game->route_banner_text), "%s", route->name);
     game->route_banner_timer = 3.5f;
 
+    // Generate thematic rich tilemap for this route
+    Tilemap_GenerateRouteMap(&game->tilemap, section_idx, route_idx);
+
     // Load active Pokemon for this route into game->enemy_types
     int type_slot = 0;
     for (int i = 0; i < route->pokemon_count && type_slot < MAX_ENEMY_TYPES - 1; i++) {
@@ -432,6 +435,10 @@ void KantoRoutes_SpawnEnemies(GameState* game, float dt) {
         if (e->pos.x > WORLD_SIZE_X - 32.0f) e->pos.x = WORLD_SIZE_X - 32.0f;
         if (e->pos.y < 32.0f) e->pos.y = 32.0f;
         if (e->pos.y > WORLD_SIZE_Y - 32.0f) e->pos.y = WORLD_SIZE_Y - 32.0f;
+
+        // Push out of solid rock/water if spawned on an obstacle
+        bool can_fly = (cfg->move_pattern == ENEMY_MOVE_FLANK_ORBIT || cfg->attack_type == ENEMY_ATTACK_RANGED_GUST);
+        Tilemap_CheckCollisionCircle(&game->tilemap, &e->pos.x, &e->pos.y, e->radius, can_fly);
 
         e->ai_state = ENEMY_AI_CHASE;
         e->state_timer = 0.0f;

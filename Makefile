@@ -14,7 +14,8 @@ SRCS = src/main.c \
        src/dev_menu.c \
        src/profiler.c \
        src/font.c \
-       src/telemetry.c
+       src/telemetry.c \
+       src/tilemap.c
 
 OBJS = $(SRCS:.c=.o)
 DEPS = $(SRCS:.c=.d)

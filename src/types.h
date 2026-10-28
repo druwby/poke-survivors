@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "config.h"
+#include "tilemap.h"
 
 typedef struct {
     float x;
@@ -631,6 +632,7 @@ typedef struct {
     SDL_Texture* tileset_texture;
     SDL_Texture* floor_cache_texture;
     SDL_Texture* font_texture;
+    TileMap tilemap;
     
     // Starter selection portraits
     SDL_Texture* starter_portraits[3]; // Bulbasaur (0), Charmander (1), Squirtle (2)

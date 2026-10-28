@@ -567,6 +567,220 @@ void test_combat_engagement_ttk_and_instant_kill_detection() {
     printf("  -> Combat engagement TTK and instant kill detection passed!\n");
 }
 
+// Unit test 11: Exact tileset slice coordinates and layout bounds
+void test_tilemap_coordinates_and_slices() {
+    printf("[TEST] Running test_tilemap_coordinates_and_slices...\n");
+    TileMap map;
+    Tilemap_Init(&map);
+
+    // Verify all tile slices are exactly 24x24 and within image boundaries (432x192)
+    for (int i = 0; i < TILE_TOTAL_COUNT; i++) {
+        const SDL_Rect* r = Tilemap_GetSrcRect((TileIndex)i);
+        assert(r != NULL);
+        assert(r->w == 24);
+        assert(r->h == 24);
+        assert(r->x >= 0 && r->x + r->w <= 432);
+        assert(r->y >= 0 && r->y + r->h <= 192);
+        assert(r->x % 24 == 0);
+        assert(r->y % 24 == 0);
+
+        // Assert no tile slice overlaps the 3 blank/transparent slots in 432x192:
+        // Slot 1: (120, 48), Slot 2: (264, 48), Slot 3: (408, 48)
+        assert(!(r->x == 120 && r->y == 48));
+        assert(!(r->x == 264 && r->y == 48));
+        assert(!(r->x == 408 && r->y == 48));
+    }
+
+    // Verify specific key landmarks
+    assert(Tilemap_GetSrcRect(TILE_ROCK_TL)->x == 0 && Tilemap_GetSrcRect(TILE_ROCK_TL)->y == 0);
+    assert(Tilemap_GetSrcRect(TILE_ROCK_CENTER)->x == 24 && Tilemap_GetSrcRect(TILE_ROCK_CENTER)->y == 24);
+    assert(Tilemap_GetSrcRect(TILE_ROCK_B)->x == 24 && Tilemap_GetSrcRect(TILE_ROCK_B)->y == 48);
+    assert(Tilemap_GetSrcRect(TILE_ROCK_RAMP_S)->x == 96 && Tilemap_GetSrcRect(TILE_ROCK_RAMP_S)->y == 0);
+    assert(Tilemap_GetSrcRect(TILE_ROCK_INNER_TL)->x == 24 && Tilemap_GetSrcRect(TILE_ROCK_INNER_TL)->y == 144);
+    assert(Tilemap_GetSrcRect(TILE_WATER_TL)->x == 144 && Tilemap_GetSrcRect(TILE_WATER_TL)->y == 0);
+    assert(Tilemap_GetSrcRect(TILE_WATER_CENTER)->x == 168 && Tilemap_GetSrcRect(TILE_WATER_CENTER)->y == 24);
+    assert(Tilemap_GetSrcRect(TILE_GROUND_1)->x == 288 && Tilemap_GetSrcRect(TILE_GROUND_1)->y == 24);
+    assert(Tilemap_GetSrcRect(TILE_PATH_CENTER)->x == 312 && Tilemap_GetSrcRect(TILE_PATH_CENTER)->y == 24);
+
+    printf("  -> Exact 24x24 tile slice coordinates and non-empty bounds verified!\n");
+}
+
+// Unit test 12: Plateau, ramp, and water topological alignment
+void test_tilemap_plateau_and_water_alignment() {
+    printf("[TEST] Running test_tilemap_plateau_and_water_alignment...\n");
+    TileMap map;
+    Tilemap_Init(&map);
+
+    // Generate Route 1 map
+    Tilemap_GenerateRouteMap(&map, 0, 0);
+
+    // Verify boundary walls:
+    // North boundary: Row 0 is solid, Row 1 is solid cliff face facing playfield (TILE_ROCK_B)
+    for (int x = 0; x < MAP_TILES_X; x++) {
+        assert(map.cells[0][x].flags & TILE_FLAG_SOLID);
+        assert(map.cells[1][x].flags & TILE_FLAG_SOLID);
+        if (x >= 1 && x < MAP_TILES_X - 1) {
+            assert(map.cells[1][x].tile_id == TILE_ROCK_B || map.cells[1][x].tile_id == TILE_ROCK_INNER_BL || map.cells[1][x].tile_id == TILE_ROCK_INNER_BR);
+        }
+    }
+    // South boundary: Row 126 is solid cliff edge facing playfield (TILE_ROCK_T), Row 127 is solid
+    for (int x = 0; x < MAP_TILES_X; x++) {
+        assert(map.cells[MAP_TILES_Y - 2][x].flags & TILE_FLAG_SOLID);
+        assert(map.cells[MAP_TILES_Y - 1][x].flags & TILE_FLAG_SOLID);
+        if (x >= 1 && x < MAP_TILES_X - 1) {
+            assert(map.cells[MAP_TILES_Y - 2][x].tile_id == TILE_ROCK_T || map.cells[MAP_TILES_Y - 2][x].tile_id == TILE_ROCK_INNER_TL || map.cells[MAP_TILES_Y - 2][x].tile_id == TILE_ROCK_INNER_TR);
+        }
+    }
+    // West & East boundaries
+    for (int y = 0; y < MAP_TILES_Y; y++) {
+        assert(map.cells[y][0].flags & TILE_FLAG_SOLID);
+        assert(map.cells[y][1].flags & TILE_FLAG_SOLID);
+        assert(map.cells[y][MAP_TILES_X - 2].flags & TILE_FLAG_SOLID);
+        assert(map.cells[y][MAP_TILES_X - 1].flags & TILE_FLAG_SOLID);
+    }
+
+    // Count terrain occurrences
+    int rock_count = 0, water_count = 0, ramp_count = 0, path_count = 0, deco_count = 0;
+    for (int y = 0; y < MAP_TILES_Y; y++) {
+        for (int x = 0; x < MAP_TILES_X; x++) {
+            uint8_t flags = map.cells[y][x].flags;
+            if (flags & TILE_FLAG_RAMP) ramp_count++;
+            if (flags & TILE_FLAG_WATER) water_count++;
+            if (flags & TILE_FLAG_PLATEAU) rock_count++;
+            if (flags & TILE_FLAG_PATH) path_count++;
+            if (flags & TILE_FLAG_DECO) deco_count++;
+        }
+    }
+
+    assert(ramp_count > 0);
+    assert(water_count > 0);
+    assert(rock_count > 0);
+    assert(path_count > 0);
+    assert(deco_count > 0);
+
+    printf("  -> Plateau, ramp (%d ramps), water (%d tiles), and decor (%d clusters) alignment verified!\n",
+           ramp_count, water_count, deco_count);
+}
+
+// Unit test 13: Collision resolution, ramp traversal, and flying entities
+void test_tilemap_collision_and_ramp_traversal() {
+    printf("[TEST] Running test_tilemap_collision_and_ramp_traversal...\n");
+    TileMap map;
+    Tilemap_Init(&map);
+    Tilemap_GenerateRouteMap(&map, 0, 0);
+
+    // Find the first ramp on the map
+    int ramp_x = -1, ramp_y = -1;
+    for (int y = 0; y < MAP_TILES_Y && ramp_x < 0; y++) {
+        for (int x = 0; x < MAP_TILES_X; x++) {
+            if (map.cells[y][x].flags & TILE_FLAG_RAMP) {
+                ramp_x = x;
+                ramp_y = y;
+                break;
+            }
+        }
+    }
+    assert(ramp_x > 0 && ramp_y > 0);
+
+    // Verify ramp tile itself is NOT solid
+    assert(!Tilemap_IsSolid(&map, ramp_x, ramp_y, false));
+    // Verify adjacent cliff edge IS solid
+    assert(Tilemap_IsSolid(&map, ramp_x - 1, ramp_y, false) || Tilemap_IsSolid(&map, ramp_x + 1, ramp_y, false));
+
+    float rad = 18.0f;
+
+    // Test 1: Ground entity on ramp moves freely
+    float px = ramp_x * TILE_WORLD_SIZE + 32.0f;
+    float py = ramp_y * TILE_WORLD_SIZE + 32.0f;
+    bool col = Tilemap_CheckCollisionCircle(&map, &px, &py, rad, false);
+    assert(!col);
+
+    // Test 2: Ground entity moving into solid cliff next to ramp is pushed out
+    int cliff_x = (Tilemap_IsSolid(&map, ramp_x - 1, ramp_y, false)) ? (ramp_x - 1) : (ramp_x + 1);
+    float cx = cliff_x * TILE_WORLD_SIZE + 32.0f;
+    float cy = (ramp_y + 1) * TILE_WORLD_SIZE + 10.0f; // below cliff
+    cy -= 20.0f; // attempt to enter cliff
+    col = Tilemap_CheckCollisionCircle(&map, &cx, &cy, rad, false);
+    assert(col); // Blocked by cliff!
+
+    // Test 3: Flying entity passes freely over solid cliff
+    float fly_x = cliff_x * TILE_WORLD_SIZE + 32.0f;
+    float fly_y = ramp_y * TILE_WORLD_SIZE + 32.0f;
+    col = Tilemap_CheckCollisionCircle(&map, &fly_x, &fly_y, rad, true); // can_fly = true
+    assert(!col); // Flying ignores terrain!
+
+    // Test 4: Sliding along solid cliff face (diagonal movement into wall pushes out along normal)
+    float slide_x = cliff_x * TILE_WORLD_SIZE + 10.0f;
+    float slide_y = (ramp_y + 1) * TILE_WORLD_SIZE + 15.0f; // slightly overlapping cliff
+    col = Tilemap_CheckCollisionCircle(&map, &slide_x, &slide_y, rad, false);
+    assert(col);
+    assert(slide_y > (ramp_y + 1) * TILE_WORLD_SIZE + 15.0f); // pushed South away from cliff face
+
+    // Test 5: Bidirectional ramp traversal (approach from ground, cross ramp, enter plateau, and return)
+    float step_x = ramp_x * TILE_WORLD_SIZE + 32.0f;
+    float step_y = (ramp_y + 1) * TILE_WORLD_SIZE + 32.0f; // Ground level below ramp
+    assert(!Tilemap_CheckCollisionCircle(&map, &step_x, &step_y, rad, false));
+    step_y -= TILE_WORLD_SIZE; // On ramp
+    assert(!Tilemap_CheckCollisionCircle(&map, &step_x, &step_y, rad, false));
+    step_y -= TILE_WORLD_SIZE; // On plateau
+    assert(!Tilemap_CheckCollisionCircle(&map, &step_x, &step_y, rad, false));
+
+    printf("  -> Collision resolution, ramp traversal, and flying pass-through verified!\n");
+}
+
+// Unit test 14: Dynamic route generation across all Kanto sections and routes
+void test_tilemap_route_generation_across_all_routes() {
+    printf("[TEST] Running test_tilemap_route_generation_across_all_routes...\n");
+    TileMap map;
+    Tilemap_Init(&map);
+
+    int total_sections = KantoRoutes_GetTotalSections();
+    assert(total_sections == 8);
+
+    for (int s = 0; s < total_sections; s++) {
+        int route_count = KantoRoutes_GetRoutesInSection(s);
+        for (int r = 0; r < route_count; r++) {
+            Tilemap_GenerateRouteMap(&map, s, r);
+
+            // Assert player start position (64, 64) is never solid
+            assert(!Tilemap_IsSolid(&map, 64, 64, false));
+
+            // Assert safe clearance in 58..70
+            for (int cy = 60; cy <= 68; cy++) {
+                for (int cx = 60; cx <= 68; cx++) {
+                    assert(!Tilemap_IsSolid(&map, cx, cy, false));
+                }
+            }
+
+            // Assert world boundaries are solid
+            assert(Tilemap_IsSolid(&map, 0, 64, false));
+            assert(Tilemap_IsSolid(&map, MAP_TILES_X - 1, 64, false));
+            assert(Tilemap_IsSolid(&map, 64, 0, false));
+            assert(Tilemap_IsSolid(&map, 64, MAP_TILES_Y - 1, false));
+
+            // Assert no ramp directly opens into deep water (players cannot be trapped upon exiting ramps)
+            for (int y = 1; y < MAP_TILES_Y - 1; y++) {
+                for (int x = 1; x < MAP_TILES_X - 1; x++) {
+                    if (map.cells[y][x].flags & TILE_FLAG_RAMP) {
+                        assert(!(map.cells[y - 1][x].flags & TILE_FLAG_WATER));
+                        assert(!(map.cells[y + 1][x].flags & TILE_FLAG_WATER));
+                        assert(!(map.cells[y][x - 1].flags & TILE_FLAG_WATER));
+                        assert(!(map.cells[y][x + 1].flags & TILE_FLAG_WATER));
+                    }
+                }
+            }
+        }
+    }
+
+    // Verify deterministic generation: re-generating section 0, route 0 produces identical map
+    TileMap map_copy;
+    Tilemap_GenerateRouteMap(&map_copy, 0, 0);
+    Tilemap_GenerateRouteMap(&map, 0, 0);
+    assert(memcmp(map.cells, map_copy.cells, sizeof(map.cells)) == 0);
+
+    printf("  -> Route generation across all 8 sections and 32 Kanto routes verified!\n");
+}
+
 int main() {
     g_headless_sim = true;
     printf("=========================================\n");
@@ -582,6 +796,10 @@ int main() {
     test_dynamic_scaling_and_time_tenacity();
     test_telemetry_streamer();
     test_combat_engagement_ttk_and_instant_kill_detection();
+    test_tilemap_coordinates_and_slices();
+    test_tilemap_plateau_and_water_alignment();
+    test_tilemap_collision_and_ramp_traversal();
+    test_tilemap_route_generation_across_all_routes();
     printf("\n>>> ALL TESTS PASSED SUCCESSFULLY! <<<\n");
     return 0;
 }

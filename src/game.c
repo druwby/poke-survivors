@@ -556,6 +556,7 @@ void Party_Update(GameState* game, float dt) {
             }
             m->pos.x += m->vel.x * dt;
             m->pos.y += m->vel.y * dt;
+            Tilemap_CheckCollisionCircle(&game->tilemap, &m->pos.x, &m->pos.y, p->radius * 0.85f, false);
         }
 
         // Animation and facing direction update
@@ -916,27 +917,11 @@ void Game_Init(GameState* game, SDL_Window* window, SDL_Renderer* renderer) {
     game->selected_starter_hover = STARTER_NONE;
     game->selected_card_hover = -1;
 
-    // Load Environment Tileset and pre-render 512x512 floor cache
+    // Initialize Rich Environment Tilemap & Load Tileset
+    Tilemap_Init(&game->tilemap);
+    Tilemap_GenerateRouteMap(&game->tilemap, 0, 0);
     game->tileset_texture = Image_LoadTexture(renderer, GetAssetPath("tilesets/tileset1.png"));
-    game->floor_cache_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 512, 512);
-    if (game->floor_cache_texture) {
-        SDL_SetRenderTarget(renderer, game->floor_cache_texture);
-        for (int y = 0; y < 512; y += 64) {
-            for (int x = 0; x < 512; x += 64) {
-                if (game->tileset_texture) {
-                    SDL_Rect src = { 0, 0, 48, 48 };
-                    SDL_Rect dst = { x, y, 64, 64 };
-                    SDL_RenderCopy(renderer, game->tileset_texture, &src, &dst);
-                } else {
-                    if ((x/64 + y/64) % 2 == 0) SDL_SetRenderDrawColor(renderer, 24, 30, 38, 255);
-                    else SDL_SetRenderDrawColor(renderer, 20, 25, 32, 255);
-                    SDL_Rect r = { x, y, 64, 64 };
-                    SDL_RenderFillRect(renderer, &r);
-                }
-            }
-        }
-        SDL_SetRenderTarget(renderer, NULL);
-    }
+    game->floor_cache_texture = NULL;
 
     // Initialize Weapons & Spawner
     Weapons_Init(&game->weapons);
@@ -1166,6 +1151,9 @@ void Game_Update(GameState* game, float dt) {
     
     p->pos.x += p->vel.x * dt;
     p->pos.y += p->vel.y * dt;
+    
+    // Resolve collision against solid rock cliffs and water bodies
+    Tilemap_CheckCollisionCircle(&game->tilemap, &p->pos.x, &p->pos.y, p->radius, false);
     
     if (p->pos.x < p->radius) p->pos.x = p->radius;
     if (p->pos.x > WORLD_SIZE_X - p->radius) p->pos.x = WORLD_SIZE_X - p->radius;
@@ -1620,6 +1608,9 @@ void Game_Update(GameState* game, float dt) {
         
         e->pos.x += e->vel.x * dt;
         e->pos.y += e->vel.y * dt;
+        
+        bool can_fly = (cfg->move_pattern == ENEMY_MOVE_FLANK_ORBIT || cfg->attack_type == ENEMY_ATTACK_RANGED_GUST);
+        Tilemap_CheckCollisionCircle(&game->tilemap, &e->pos.x, &e->pos.y, e->radius, can_fly);
         
         if (e->flash_timer > 0.0f) e->flash_timer -= dt;
         if (e->orbiter_hit_cooldown > 0.0f) e->orbiter_hit_cooldown -= dt;
@@ -2107,23 +2098,8 @@ void Game_Draw(GameState* game) {
     // PLAYING / LEVEL-UP / GAME-OVER WORLD RENDERING
     // -------------------------------------------------------------
 
-    // 1. Render World Tileset Floor
-    if (game->floor_cache_texture) {
-        int start_tile_x = ((int)camera.x / 512) * 512;
-        int start_tile_y = ((int)camera.y / 512) * 512;
-        int end_tile_x = start_tile_x + WINDOW_WIDTH + 512;
-        int end_tile_y = start_tile_y + WINDOW_HEIGHT + 512;
-        
-        for (int ty = start_tile_y; ty < end_tile_y; ty += 512) {
-            for (int tx = start_tile_x; tx < end_tile_x; tx += 512) {
-                SDL_Rect dst = { (int)(tx - camera.x), (int)(ty - camera.y), 512, 512 };
-                SDL_RenderCopy(renderer, game->floor_cache_texture, NULL, &dst);
-            }
-        }
-    } else {
-        SDL_SetRenderDrawColor(renderer, 20, 25, 32, 255);
-        SDL_RenderClear(renderer);
-    }
+    // 1. Render World Tileset (Rich Route Tilemap)
+    Tilemap_Render(&game->tilemap, renderer, game->tileset_texture, camera.x, camera.y);
     
     // 2. Spatial Grid Visualizer
     if (game->dev_menu.show_spatial_grid) {
