@@ -781,6 +781,338 @@ void test_tilemap_route_generation_across_all_routes() {
     printf("  -> Route generation across all 8 sections and 32 Kanto routes verified!\n");
 }
 
+// Unit test 15: Flow field pathfinding, ramp routing across elevations, and pond avoidance
+void test_tilemap_pathfinding_and_ramp_routing() {
+    printf("[TEST] Running test_tilemap_pathfinding_and_ramp_routing...\n");
+    TileMap map;
+    Tilemap_Init(&map);
+    Tilemap_GenerateRouteMap(&map, 0, 0);
+
+    // Locate the first plateau and ramp
+    // Route (0, 0) has plateau at (18, 18, 16, 12) with South ramp at (26, 29)
+    int ramp_x = 26, ramp_y = 29;
+    assert(map.cells[ramp_y][ramp_x].flags & TILE_FLAG_RAMP);
+
+    // Test 1: Ground enemy navigating to player on plateau via ramp
+    // Player is at (26, 24) on the plateau (elevation 1)
+    float px = ramp_x * TILE_WORLD_SIZE + 32.0f;
+    float py = 24 * TILE_WORLD_SIZE + 32.0f;
+    assert(map.cells[24][ramp_x].elevation == 1);
+    assert(!Tilemap_IsSolid(&map, ramp_x, 24, false));
+
+    // Enemy starts on ground below the southwest cliff face: (20, 35) (elevation 0)
+    float ex = 20 * TILE_WORLD_SIZE + 32.0f;
+    float ey = 35 * TILE_WORLD_SIZE + 32.0f;
+    assert(map.cells[35][20].elevation == 0);
+    assert(!Tilemap_IsSolid(&map, 20, 35, false));
+
+    // Direct line of sight must be false (different elevations and solid cliff in between)
+    assert(!Tilemap_HasLineOfSight(&map, ex, ey, px, py));
+
+    Tilemap_UpdateFlowField(&map, px, py);
+
+    // Simulate ground enemy movement for up to 300 steps
+    float speed = 160.0f;
+    float dt = 0.05f;
+    bool visited_ramp = false;
+    bool reached_plateau = false;
+    bool reached_player = false;
+
+    for (int step = 0; step < 300; step++) {
+        float dir_x = 0.0f, dir_y = 0.0f;
+        Tilemap_GetPathDirection(&map, ex, ey, px, py, &dir_x, &dir_y);
+
+        ex += dir_x * speed * dt;
+        ey += dir_y * speed * dt;
+        Tilemap_CheckCollisionCircle(&map, &ex, &ey, 16.0f, false);
+
+        int cur_tx = (int)floorf(ex / TILE_WORLD_SIZE);
+        int cur_ty = (int)floorf(ey / TILE_WORLD_SIZE);
+
+        if (cur_tx == ramp_x && cur_ty == ramp_y) {
+            visited_ramp = true;
+        }
+        if (map.cells[cur_ty][cur_tx].elevation == 1 && cur_ty < ramp_y) {
+            reached_plateau = true;
+        }
+
+        float to_px = px - ex;
+        float to_py = py - ey;
+        if (sqrtf(to_px * to_px + to_py * to_py) < 32.0f) {
+            reached_player = true;
+            break;
+        }
+    }
+
+    assert(visited_ramp);      // Routed through the ramp!
+    assert(reached_plateau);   // Successfully climbed onto the plateau!
+    assert(reached_player);    // Successfully reached the player!
+
+    // Test 1b: Ground enemy starting North of plateau: (26, 10)
+    ex = 26 * TILE_WORLD_SIZE + 32.0f;
+    ey = 10 * TILE_WORLD_SIZE + 32.0f;
+    visited_ramp = false;
+    reached_plateau = false;
+    reached_player = false;
+    for (int step = 0; step < 600; step++) {
+        float dir_x = 0.0f, dir_y = 0.0f;
+        Tilemap_GetPathDirection(&map, ex, ey, px, py, &dir_x, &dir_y);
+        ex += dir_x * speed * dt;
+        ey += dir_y * speed * dt;
+        Tilemap_CheckCollisionCircle(&map, &ex, &ey, 16.0f, false);
+        int cur_tx = (int)floorf(ex / TILE_WORLD_SIZE);
+        int cur_ty = (int)floorf(ey / TILE_WORLD_SIZE);
+        if (cur_tx == ramp_x && cur_ty == ramp_y) visited_ramp = true;
+        if (map.cells[cur_ty][cur_tx].elevation == 1 && cur_ty < ramp_y) reached_plateau = true;
+        float to_px = px - ex;
+        float to_py = py - ey;
+        if (sqrtf(to_px * to_px + to_py * to_py) < 32.0f) {
+            reached_player = true;
+            break;
+        }
+    }
+    printf("Test 1b (North of plateau): visited_ramp=%d, reached_plateau=%d, reached_player=%d\n", visited_ramp, reached_plateau, reached_player);
+    assert(visited_ramp);
+    assert(reached_plateau);
+    assert(reached_player);
+
+    // Test 1c: Ground enemy starting West of plateau: (10, 24)
+    ex = 10 * TILE_WORLD_SIZE + 32.0f;
+    ey = 24 * TILE_WORLD_SIZE + 32.0f;
+    visited_ramp = false;
+    reached_plateau = false;
+    reached_player = false;
+    for (int step = 0; step < 600; step++) {
+        float dir_x = 0.0f, dir_y = 0.0f;
+        Tilemap_GetPathDirection(&map, ex, ey, px, py, &dir_x, &dir_y);
+        ex += dir_x * speed * dt;
+        ey += dir_y * speed * dt;
+        Tilemap_CheckCollisionCircle(&map, &ex, &ey, 16.0f, false);
+        int cur_tx = (int)floorf(ex / TILE_WORLD_SIZE);
+        int cur_ty = (int)floorf(ey / TILE_WORLD_SIZE);
+        if (cur_tx == ramp_x && cur_ty == ramp_y) visited_ramp = true;
+        if (map.cells[cur_ty][cur_tx].elevation == 1 && cur_ty < ramp_y) reached_plateau = true;
+        float to_px = px - ex;
+        float to_py = py - ey;
+        if (sqrtf(to_px * to_px + to_py * to_py) < 32.0f) {
+            reached_player = true;
+            break;
+        }
+    }
+    printf("Test 1c (West of plateau): visited_ramp=%d, reached_plateau=%d, reached_player=%d\n", visited_ramp, reached_plateau, reached_player);
+    assert(visited_ramp);
+    assert(reached_plateau);
+    assert(reached_player);
+
+    // Test 1d: Boss enemy with radius 43.2f navigating to player on plateau via ramp
+    ex = 20 * TILE_WORLD_SIZE + 32.0f;
+    ey = 35 * TILE_WORLD_SIZE + 32.0f;
+    visited_ramp = false;
+    reached_plateau = false;
+    reached_player = false;
+    for (int step = 0; step < 600; step++) {
+        float dir_x = 0.0f, dir_y = 0.0f;
+        Tilemap_GetPathDirection(&map, ex, ey, px, py, &dir_x, &dir_y);
+        ex += dir_x * speed * dt;
+        ey += dir_y * speed * dt;
+        Tilemap_CheckCollisionCircle(&map, &ex, &ey, 43.2f, false);
+        int cur_tx = (int)floorf(ex / TILE_WORLD_SIZE);
+        int cur_ty = (int)floorf(ey / TILE_WORLD_SIZE);
+        if (cur_tx == ramp_x && cur_ty == ramp_y) visited_ramp = true;
+        if (map.cells[cur_ty][cur_tx].elevation == 1 && cur_ty < ramp_y) reached_plateau = true;
+        float to_px = px - ex;
+        float to_py = py - ey;
+        if (sqrtf(to_px * to_px + to_py * to_py) < 60.0f) {
+            reached_player = true;
+            break;
+        }
+    }
+    printf("Test 1d (Boss radius 43.2): visited_ramp=%d, reached_plateau=%d, reached_player=%d\n", visited_ramp, reached_plateau, reached_player);
+    assert(visited_ramp);
+    assert(reached_plateau);
+    assert(reached_player);
+
+    // Test 2: Reverse navigation - Player on ground, enemy on plateau
+    px = 20 * TILE_WORLD_SIZE + 32.0f;
+    py = 35 * TILE_WORLD_SIZE + 32.0f; // ground
+    ex = ramp_x * TILE_WORLD_SIZE + 32.0f;
+    ey = 24 * TILE_WORLD_SIZE + 32.0f; // plateau
+
+    assert(!Tilemap_HasLineOfSight(&map, ex, ey, px, py));
+    Tilemap_UpdateFlowField(&map, px, py);
+
+    visited_ramp = false;
+    bool reached_ground = false;
+    reached_player = false;
+
+    for (int step = 0; step < 300; step++) {
+        float dir_x = 0.0f, dir_y = 0.0f;
+        Tilemap_GetPathDirection(&map, ex, ey, px, py, &dir_x, &dir_y);
+
+        ex += dir_x * speed * dt;
+        ey += dir_y * speed * dt;
+        Tilemap_CheckCollisionCircle(&map, &ex, &ey, 16.0f, false);
+
+        int cur_tx = (int)floorf(ex / TILE_WORLD_SIZE);
+        int cur_ty = (int)floorf(ey / TILE_WORLD_SIZE);
+
+        if (cur_tx == ramp_x && cur_ty == ramp_y) {
+            visited_ramp = true;
+        }
+        if (map.cells[cur_ty][cur_tx].elevation == 0) {
+            reached_ground = true;
+        }
+
+        float to_px = px - ex;
+        float to_py = py - ey;
+        if (sqrtf(to_px * to_px + to_py * to_py) < 32.0f) {
+            reached_player = true;
+            break;
+        }
+    }
+
+    assert(visited_ramp);     // Exited through the ramp!
+    assert(reached_ground);   // Descended to ground!
+    assert(reached_player);   // Reached player on ground!
+
+    // Test 3: Navigating around solid pond
+    // Pond at (44, 26, 10, 8)
+    px = 38 * TILE_WORLD_SIZE + 32.0f; // West of pond
+    py = 30 * TILE_WORLD_SIZE + 32.0f;
+    ex = 58 * TILE_WORLD_SIZE + 32.0f; // East of pond
+    ey = 30 * TILE_WORLD_SIZE + 32.0f;
+
+    assert(!Tilemap_HasLineOfSight(&map, ex, ey, px, py));
+    Tilemap_UpdateFlowField(&map, px, py);
+
+    reached_player = false;
+    bool stepped_in_water = false;
+
+    for (int step = 0; step < 300; step++) {
+        float dir_x = 0.0f, dir_y = 0.0f;
+        Tilemap_GetPathDirection(&map, ex, ey, px, py, &dir_x, &dir_y);
+
+        ex += dir_x * speed * dt;
+        ey += dir_y * speed * dt;
+        Tilemap_CheckCollisionCircle(&map, &ex, &ey, 16.0f, false);
+
+        int cur_tx = (int)floorf(ex / TILE_WORLD_SIZE);
+        int cur_ty = (int)floorf(ey / TILE_WORLD_SIZE);
+        if (map.cells[cur_ty][cur_tx].flags & TILE_FLAG_WATER) {
+            stepped_in_water = true;
+        }
+
+        float to_px = px - ex;
+        float to_py = py - ey;
+        if (sqrtf(to_px * to_px + to_py * to_py) < 32.0f) {
+            reached_player = true;
+            break;
+        }
+    }
+
+    assert(!stepped_in_water); // Successfully routed around water!
+    assert(reached_player);    // Reached player across the pond!
+
+    // Test 4: Open space line of sight
+    px = 64 * TILE_WORLD_SIZE + 32.0f;
+    py = 64 * TILE_WORLD_SIZE + 32.0f;
+    ex = 60 * TILE_WORLD_SIZE + 32.0f;
+    ey = 60 * TILE_WORLD_SIZE + 32.0f;
+    assert(Tilemap_HasLineOfSight(&map, ex, ey, px, py));
+
+    float dir_x = 0.0f, dir_y = 0.0f;
+    bool los = Tilemap_GetPathDirection(&map, ex, ey, px, py, &dir_x, &dir_y);
+    assert(los);
+    float expected_dx = px - ex;
+    float expected_dy = py - ey;
+    float expected_len = sqrtf(expected_dx * expected_dx + expected_dy * expected_dy);
+    assert(fabsf(dir_x - (expected_dx / expected_len)) < 0.001f);
+    assert(fabsf(dir_y - (expected_dy / expected_len)) < 0.001f);
+
+    // Test 5: Ramp-aware Line of Sight
+    // 5a: Straight line through ramp connects ground (26, 32) and plateau (26, 24)
+    float ground_aligned_x = ramp_x * TILE_WORLD_SIZE + 32.0f;
+    float ground_aligned_y = 32 * TILE_WORLD_SIZE + 32.0f;
+    float plateau_aligned_x = ramp_x * TILE_WORLD_SIZE + 32.0f;
+    float plateau_aligned_y = 24 * TILE_WORLD_SIZE + 32.0f;
+    assert(Tilemap_HasLineOfSight(&map, ground_aligned_x, ground_aligned_y, plateau_aligned_x, plateau_aligned_y));
+
+    // 5b: Line of sight between ground entrance (26, 30) and ramp tile (26, 29)
+    float ramp_entrance_y = 30 * TILE_WORLD_SIZE + 32.0f;
+    float ramp_tile_y = 29 * TILE_WORLD_SIZE + 32.0f;
+    assert(Tilemap_HasLineOfSight(&map, ground_aligned_x, ramp_entrance_y, ground_aligned_x, ramp_tile_y));
+
+    // 5c: Line of sight across solid cliff without ramp is blocked
+    float ground_cliff_x = 20 * TILE_WORLD_SIZE + 32.0f;
+    float ground_cliff_y = 32 * TILE_WORLD_SIZE + 32.0f;
+    assert(!Tilemap_HasLineOfSight(&map, ground_cliff_x, ground_cliff_y, plateau_aligned_x, plateau_aligned_y));
+
+    // Test 6: Touch damage elevation gating & ramp pass-through
+    static GameState test_game;
+    memset(&test_game, 0, sizeof(GameState));
+    test_game.app_state = APP_STATE_PLAYING;
+    test_game.route_timer = 999.0f;
+    test_game.route_kill_quota = 999;
+    test_game.player.max_hp = 100.0f;
+    Tilemap_Init(&test_game.tilemap);
+    Tilemap_GenerateRouteMap(&test_game.tilemap, 0, 0);
+
+    test_game.active_enemy_count = 1;
+    test_game.active_enemy_indices[0] = 0;
+    test_game.enemies[0].active = true;
+    test_game.enemies[0].type = 0;
+    test_game.enemies[0].max_hp = 100.0f;
+    test_game.enemies[0].hp = 100.0f;
+    test_game.enemies[0].radius = 16.0f;
+    test_game.enemies[0].touch_damage = 25.0f;
+    test_game.enemy_types[0].move_pattern = ENEMY_MOVE_SWARM;
+    test_game.enemy_types[0].touch_damage = 25.0f;
+
+    // 6a: Player on ramp (26, 29), ground enemy at ramp entrance (26, 30) touching player -> DAMAGE DEALT
+    test_game.player.pos.x = ramp_x * TILE_WORLD_SIZE + 32.0f;
+    test_game.player.pos.y = ramp_y * TILE_WORLD_SIZE + 32.0f;
+    test_game.player.radius = 16.0f;
+    test_game.player.hp = 100.0f;
+    test_game.player.invuln_timer = 0.0f;
+
+    test_game.enemies[0].pos.x = ramp_x * TILE_WORLD_SIZE + 32.0f;
+    test_game.enemies[0].pos.y = ramp_y * TILE_WORLD_SIZE + 50.0f; // 18px away, touching!
+
+    Game_Update(&test_game, 0.016f);
+    assert(test_game.player.hp < 100.0f); // Damage dealt on ramp!
+
+    // 6b: Player on plateau (19, 28, elevation 1), enemy on ground across West cliff (17, 28, elevation 0)
+    // Radii sum to 72px, distance is 68px (overlapping across 64px cliff tile 18) -> BLOCKED by elevation cliff!
+    test_game.player.pos.x = 19 * TILE_WORLD_SIZE + 2.0f;
+    test_game.player.pos.y = 28 * TILE_WORLD_SIZE + 32.0f;
+    test_game.player.radius = 36.0f;
+    test_game.player.hp = 100.0f;
+    test_game.player.invuln_timer = 0.0f;
+
+    test_game.enemies[0].pos.x = 18 * TILE_WORLD_SIZE - 2.0f;
+    test_game.enemies[0].pos.y = 28 * TILE_WORLD_SIZE + 32.0f;
+    test_game.enemies[0].radius = 36.0f;
+    test_game.enemy_types[0].move_pattern = ENEMY_MOVE_SWARM;
+    assert(test_game.tilemap.cells[28][19].elevation == 1);
+    assert(test_game.tilemap.cells[28][17].elevation == 0);
+    assert(test_game.tilemap.cells[28][18].flags & TILE_FLAG_SOLID);
+
+    Game_Update(&test_game, 0.016f);
+    assert(test_game.player.hp == 100.0f); // Blocked across cliff elevation boundary!
+
+    // 6c: Flying enemy touching player across cliff -> DAMAGE DEALT
+    test_game.enemy_types[0].move_pattern = ENEMY_MOVE_FLANK_ORBIT;
+    test_game.player.pos.x = 19 * TILE_WORLD_SIZE + 2.0f;
+    test_game.player.pos.y = 28 * TILE_WORLD_SIZE + 32.0f;
+    test_game.enemies[0].pos.x = 18 * TILE_WORLD_SIZE + 50.0f;
+    test_game.enemies[0].pos.y = 28 * TILE_WORLD_SIZE + 32.0f;
+    test_game.player.invuln_timer = 0.0f;
+    Game_Update(&test_game, 0.016f);
+    assert(test_game.player.hp < 100.0f); // Flying enemy deals damage over obstacles!
+
+    printf("  -> Flow field pathfinding, bidirectional ramp traversal, LoS, and touch damage verified!\n");
+}
+
 int main() {
     g_headless_sim = true;
     printf("=========================================\n");
@@ -800,6 +1132,7 @@ int main() {
     test_tilemap_plateau_and_water_alignment();
     test_tilemap_collision_and_ramp_traversal();
     test_tilemap_route_generation_across_all_routes();
+    test_tilemap_pathfinding_and_ramp_routing();
     printf("\n>>> ALL TESTS PASSED SUCCESSFULLY! <<<\n");
     return 0;
 }

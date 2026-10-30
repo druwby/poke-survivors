@@ -632,12 +632,35 @@ bool Tilemap_CheckCollisionCircle(const TileMap* map, float* pos_x, float* pos_y
 
     bool collided = false;
 
+    // Large entities (e.g. Bosses like Onix with radius 43.2) need to be able to fit
+    // through 1-tile wide (64px) ramps. Check if entity is currently in or adjacent to a ramp tile.
+    float col_radius = radius;
+    if (radius > 26.0f) {
+        int ctx = (int)floorf(*pos_x / TILE_WORLD_SIZE);
+        int cty = (int)floorf(*pos_y / TILE_WORLD_SIZE);
+        bool near_ramp = false;
+        for (int dy = -1; dy <= 1 && !near_ramp; dy++) {
+            for (int dx = -1; dx <= 1 && !near_ramp; dx++) {
+                int nx = ctx + dx;
+                int ny = cty + dy;
+                if (nx >= 0 && nx < MAP_TILES_X && ny >= 0 && ny < MAP_TILES_Y) {
+                    if (map->cells[ny][nx].flags & TILE_FLAG_RAMP) {
+                        near_ramp = true;
+                    }
+                }
+            }
+        }
+        if (near_ramp) {
+            col_radius = 26.0f;
+        }
+    }
+
     // Resolve collision against solid cliff and water AABBs with 2 relaxation iterations
     for (int iter = 0; iter < 2; iter++) {
-        int min_tx = (int)floorf((*pos_x - radius) / TILE_WORLD_SIZE);
-        int max_tx = (int)floorf((*pos_x + radius) / TILE_WORLD_SIZE);
-        int min_ty = (int)floorf((*pos_y - radius) / TILE_WORLD_SIZE);
-        int max_ty = (int)floorf((*pos_y + radius) / TILE_WORLD_SIZE);
+        int min_tx = (int)floorf((*pos_x - col_radius) / TILE_WORLD_SIZE);
+        int max_tx = (int)floorf((*pos_x + col_radius) / TILE_WORLD_SIZE);
+        int min_ty = (int)floorf((*pos_y - col_radius) / TILE_WORLD_SIZE);
+        int max_ty = (int)floorf((*pos_y + col_radius) / TILE_WORLD_SIZE);
 
         if (min_tx < 0) min_tx = 0;
         if (max_tx >= MAP_TILES_X) max_tx = MAP_TILES_X - 1;
@@ -661,11 +684,11 @@ bool Tilemap_CheckCollisionCircle(const TileMap* map, float* pos_x, float* pos_y
                 float dy = *pos_y - cy;
                 float dist_sq = dx * dx + dy * dy;
 
-                if (dist_sq < radius * radius) {
+                if (dist_sq < col_radius * col_radius) {
                     collided = true;
                     float dist = sqrtf(dist_sq);
                     if (dist > 0.0001f) {
-                        float push = radius - dist;
+                        float push = col_radius - dist;
                         *pos_x += (dx / dist) * push;
                         *pos_y += (dy / dist) * push;
                     } else {
@@ -675,10 +698,10 @@ bool Tilemap_CheckCollisionCircle(const TileMap* map, float* pos_x, float* pos_y
                         float pen_t = *pos_y - box_min_y;
                         float pen_b = box_max_y - *pos_y;
                         float min_pen = fminf(fminf(pen_l, pen_r), fminf(pen_t, pen_b));
-                        if (min_pen == pen_l) *pos_x = box_min_x - radius;
-                        else if (min_pen == pen_r) *pos_x = box_max_x + radius;
-                        else if (min_pen == pen_t) *pos_y = box_min_y - radius;
-                        else *pos_y = box_max_y + radius;
+                        if (min_pen == pen_l) *pos_x = box_min_x - col_radius;
+                        else if (min_pen == pen_r) *pos_x = box_max_x + col_radius;
+                        else if (min_pen == pen_t) *pos_y = box_min_y - col_radius;
+                        else *pos_y = box_max_y + col_radius;
                     }
                 }
             }
@@ -686,4 +709,357 @@ bool Tilemap_CheckCollisionCircle(const TileMap* map, float* pos_x, float* pos_y
     }
 
     return collided;
+}
+
+bool Tilemap_HasLineOfSight(const TileMap* map, float x1, float y1, float x2, float y2) {
+    if (!map) return false;
+
+    int tx1 = (int)floorf(x1 / TILE_WORLD_SIZE);
+    int ty1 = (int)floorf(y1 / TILE_WORLD_SIZE);
+    int tx2 = (int)floorf(x2 / TILE_WORLD_SIZE);
+    int ty2 = (int)floorf(y2 / TILE_WORLD_SIZE);
+
+    if (tx1 < 0 || tx1 >= MAP_TILES_X || ty1 < 0 || ty1 >= MAP_TILES_Y) return false;
+    if (tx2 < 0 || tx2 >= MAP_TILES_X || ty2 < 0 || ty2 >= MAP_TILES_Y) return false;
+
+    // Both endpoints must not be inside solid obstacles
+    if (map->cells[ty1][tx1].flags & TILE_FLAG_SOLID) return false;
+    if (map->cells[ty2][tx2].flags & TILE_FLAG_SOLID) return false;
+
+    if (tx1 == tx2 && ty1 == ty2) return true;
+
+    // Fast integer Bresenham line traversal
+    int dx = abs(tx2 - tx1);
+    int dy = abs(ty2 - ty1);
+    int sx = (tx1 < tx2) ? 1 : -1;
+    int sy = (ty1 < ty2) ? 1 : -1;
+    int err = dx - dy;
+
+    int cx = tx1;
+    int cy = ty1;
+    uint8_t curr_elev = map->cells[ty1][tx1].elevation;
+    uint8_t target_elev = map->cells[ty2][tx2].elevation;
+
+    while (cx != tx2 || cy != ty2) {
+        int prev_x = cx;
+        int prev_y = cy;
+        int e2 = 2 * err;
+        int step_x = 0;
+        int step_y = 0;
+
+        if (e2 > -dy) {
+            err -= dy;
+            cx += sx;
+            step_x = sx;
+        }
+        if (e2 < dx) {
+            err += dx;
+            cy += sy;
+            step_y = sy;
+        }
+
+        if (cx < 0 || cx >= MAP_TILES_X || cy < 0 || cy >= MAP_TILES_Y) {
+            return false;
+        }
+
+        // Check corner cutting on diagonal step
+        if (step_x != 0 && step_y != 0) {
+            if (Tilemap_IsSolid(map, cx - step_x, cy, false) ||
+                Tilemap_IsSolid(map, cx, cy - step_y, false)) {
+                return false;
+            }
+        }
+
+        if (map->cells[cy][cx].flags & TILE_FLAG_SOLID) {
+            return false;
+        }
+
+        // Elevation transition handling:
+        // Transition between differing elevations is only permissible via a ramp tile
+        uint8_t next_elev = map->cells[cy][cx].elevation;
+        if (next_elev != curr_elev) {
+            bool has_ramp = ((map->cells[cy][cx].flags & TILE_FLAG_RAMP) != 0) ||
+                            ((map->cells[prev_y][prev_x].flags & TILE_FLAG_RAMP) != 0);
+            if (!has_ramp) {
+                return false;
+            }
+            curr_elev = next_elev;
+        }
+    }
+
+    return (curr_elev == target_elev || (map->cells[ty2][tx2].flags & TILE_FLAG_RAMP) != 0);
+}
+
+static uint16_t s_bfs_queue[MAP_TILES_X * MAP_TILES_Y];
+
+void Tilemap_UpdateFlowField(TileMap* map, float target_x, float target_y) {
+    if (!map) return;
+
+    int ptx = (int)floorf(target_x / TILE_WORLD_SIZE);
+    int pty = (int)floorf(target_y / TILE_WORLD_SIZE);
+
+    if (ptx < 0) ptx = 0;
+    if (ptx >= MAP_TILES_X) ptx = MAP_TILES_X - 1;
+    if (pty < 0) pty = 0;
+    if (pty >= MAP_TILES_Y) pty = MAP_TILES_Y - 1;
+
+    int orig_ptx = ptx;
+    int orig_pty = pty;
+
+    // If target tile is solid, search outward for nearest passable tile
+    if (Tilemap_IsSolid(map, ptx, pty, false)) {
+        int best_nx = ptx, best_ny = pty;
+        int found = 0;
+        for (int r = 1; r <= 4 && !found; r++) {
+            for (int dy = -r; dy <= r && !found; dy++) {
+                for (int dx = -r; dx <= r && !found; dx++) {
+                    int nx = ptx + dx;
+                    int ny = pty + dy;
+                    if (nx >= 0 && nx < MAP_TILES_X && ny >= 0 && ny < MAP_TILES_Y) {
+                        if (!Tilemap_IsSolid(map, nx, ny, false)) {
+                            best_nx = nx;
+                            best_ny = ny;
+                            found = 1;
+                        }
+                    }
+                }
+            }
+        }
+        ptx = best_nx;
+        pty = best_ny;
+    }
+
+    // Skip recomputation if target tile has not changed and field is valid
+    if (map->path_field.valid &&
+        map->path_field.target_tile_x == orig_ptx &&
+        map->path_field.target_tile_y == orig_pty) {
+        return;
+    }
+
+    memset(map->path_field.dist, 0xFF, sizeof(map->path_field.dist));
+
+    int head = 0, tail = 0;
+    map->path_field.dist[pty][ptx] = 0;
+    s_bfs_queue[tail++] = (uint16_t)((pty << 7) | ptx);
+
+    static const int dx[4] = { 0, 0, -1, 1 };
+    static const int dy[4] = { -1, 1, 0, 0 };
+
+    while (head < tail) {
+        uint16_t curr = s_bfs_queue[head++];
+        int cx = curr & 0x7F;
+        int cy = (curr >> 7) & 0x7F;
+        uint16_t nd = map->path_field.dist[cy][cx] + 1;
+        uint8_t c_elev = map->cells[cy][cx].elevation;
+
+        for (int i = 0; i < 4; i++) {
+            int nx = cx + dx[i];
+            int ny = cy + dy[i];
+
+            if (nx < 0 || nx >= MAP_TILES_X || ny < 0 || ny >= MAP_TILES_Y) continue;
+            if (Tilemap_IsSolid(map, nx, ny, false)) continue;
+
+            // Enforce ramp requirement for elevation transitions
+            uint8_t n_elev = map->cells[ny][nx].elevation;
+            if (c_elev != n_elev) {
+                bool has_ramp = ((map->cells[cy][cx].flags & TILE_FLAG_RAMP) != 0) ||
+                                ((map->cells[ny][nx].flags & TILE_FLAG_RAMP) != 0);
+                if (!has_ramp) continue;
+            }
+
+            if (map->path_field.dist[ny][nx] == 0xFFFF) {
+                map->path_field.dist[ny][nx] = nd;
+                s_bfs_queue[tail++] = (uint16_t)((ny << 7) | nx);
+            }
+        }
+    }
+
+    map->path_field.target_tile_x = orig_ptx;
+    map->path_field.target_tile_y = orig_pty;
+    map->path_field.valid = true;
+}
+
+bool Tilemap_GetPathDirection(TileMap* map, float from_x, float from_y, float target_x, float target_y, float* out_dir_x, float* out_dir_y) {
+    if (!map || !out_dir_x || !out_dir_y) return false;
+
+    // Default direction directly towards target
+    float dx = target_x - from_x;
+    float dy = target_y - from_y;
+    float dist = sqrtf(dx * dx + dy * dy);
+    if (dist > 0.001f) {
+        *out_dir_x = dx / dist;
+        *out_dir_y = dy / dist;
+    } else {
+        *out_dir_x = 0.0f;
+        *out_dir_y = 0.0f;
+        return true;
+    }
+
+    int tx = (int)floorf(from_x / TILE_WORLD_SIZE);
+    int ty = (int)floorf(from_y / TILE_WORLD_SIZE);
+    int ptx = (int)floorf(target_x / TILE_WORLD_SIZE);
+    int pty = (int)floorf(target_y / TILE_WORLD_SIZE);
+
+    if (tx < 0 || tx >= MAP_TILES_X || ty < 0 || ty >= MAP_TILES_Y) {
+        return false;
+    }
+
+    // If within same tile as target, direct movement is optimal
+    if (tx == ptx && ty == pty) {
+        return true;
+    }
+
+    // Direct line-of-sight check
+    if (Tilemap_HasLineOfSight(map, from_x, from_y, target_x, target_y)) {
+        return true;
+    }
+
+    // Ensure flow field is valid
+    if (!map->path_field.valid || map->path_field.target_tile_x != ptx || map->path_field.target_tile_y != pty) {
+        Tilemap_UpdateFlowField(map, target_x, target_y);
+    }
+
+    // If still unreachable or invalid, check nearby non-solid tiles
+    if (!map->path_field.valid || map->path_field.dist[ty][tx] == 0xFFFF) {
+        uint16_t min_d = 0xFFFF;
+        int escape_nx = tx, escape_ny = ty;
+        for (int ey = ty - 1; ey <= ty + 1; ey++) {
+            for (int ex = tx - 1; ex <= tx + 1; ex++) {
+                if (ex >= 0 && ex < MAP_TILES_X && ey >= 0 && ey < MAP_TILES_Y) {
+                    if (!Tilemap_IsSolid(map, ex, ey, false) && map->path_field.dist[ey][ex] < min_d) {
+                        min_d = map->path_field.dist[ey][ex];
+                        escape_nx = ex;
+                        escape_ny = ey;
+                    }
+                }
+            }
+        }
+        if (min_d < 0xFFFF) {
+            float wx = (escape_nx + 0.5f) * TILE_WORLD_SIZE;
+            float wy = (escape_ny + 0.5f) * TILE_WORLD_SIZE;
+            float edx = wx - from_x;
+            float edy = wy - from_y;
+            float elen = sqrtf(edx * edx + edy * edy);
+            if (elen > 0.001f) {
+                *out_dir_x = edx / elen;
+                *out_dir_y = edy / elen;
+            }
+        }
+        return false;
+    }
+
+    uint16_t cur_dist = map->path_field.dist[ty][tx];
+
+    // Find the neighboring tile with maximum progress towards target
+    int best_nx = tx;
+    int best_ny = ty;
+    float max_progress = 0.0f;
+
+    static const int n_dx[8] = { 0, 0, -1, 1, -1, 1, -1, 1 };
+    static const int n_dy[8] = { -1, 1, 0, 0, -1, -1, 1, 1 };
+
+    for (int i = 0; i < 8; i++) {
+        int nx = tx + n_dx[i];
+        int ny = ty + n_dy[i];
+
+        if (nx < 0 || nx >= MAP_TILES_X || ny < 0 || ny >= MAP_TILES_Y) continue;
+        if (Tilemap_IsSolid(map, nx, ny, false)) continue;
+
+        // Diagonal corner-cutting check: neither orthogonal tile can be solid
+        if (n_dx[i] != 0 && n_dy[i] != 0) {
+            if (Tilemap_IsSolid(map, tx + n_dx[i], ty, false) ||
+                Tilemap_IsSolid(map, tx, ty + n_dy[i], false)) {
+                continue;
+            }
+        }
+
+        // Elevation transition check: stepping between elevations requires a ramp
+        uint8_t c_elev = map->cells[ty][tx].elevation;
+        uint8_t n_elev = map->cells[ny][nx].elevation;
+        if (c_elev != n_elev) {
+            bool has_ramp = ((map->cells[ty][tx].flags & TILE_FLAG_RAMP) != 0) ||
+                            ((map->cells[ny][nx].flags & TILE_FLAG_RAMP) != 0);
+            if (!has_ramp) continue;
+        }
+
+        uint16_t nd = map->path_field.dist[ny][nx];
+        if (nd >= cur_dist) continue;
+
+        float edge_len = (n_dx[i] != 0 && n_dy[i] != 0) ? 1.4142f : 1.0f;
+        float progress = (float)(cur_dist - nd) / edge_len;
+
+        if (progress > max_progress) {
+            max_progress = progress;
+            best_nx = nx;
+            best_ny = ny;
+        }
+    }
+
+    if (best_nx == tx && best_ny == ty) {
+        return false;
+    }
+
+    // Primary waypoint: aim directly at target if adjacent to target tile, else center of best neighbor tile
+    float wx = (best_nx == ptx && best_ny == pty) ? target_x : (best_nx + 0.5f) * TILE_WORLD_SIZE;
+    float wy = (best_nx == ptx && best_ny == pty) ? target_y : (best_ny + 0.5f) * TILE_WORLD_SIZE;
+
+    // Lookahead: smooth turns by aiming at 2-step waypoint if unobstructed
+    int next_nx = best_nx;
+    int next_ny = best_ny;
+    float next_max_progress = 0.0f;
+    uint16_t best_dist = map->path_field.dist[best_ny][best_nx];
+
+    for (int i = 0; i < 8; i++) {
+        int nx = best_nx + n_dx[i];
+        int ny = best_ny + n_dy[i];
+
+        if (nx < 0 || nx >= MAP_TILES_X || ny < 0 || ny >= MAP_TILES_Y) continue;
+        if (Tilemap_IsSolid(map, nx, ny, false)) continue;
+
+        if (n_dx[i] != 0 && n_dy[i] != 0) {
+            if (Tilemap_IsSolid(map, best_nx + n_dx[i], best_ny, false) ||
+                Tilemap_IsSolid(map, best_nx, best_ny + n_dy[i], false)) {
+                continue;
+            }
+        }
+
+        uint8_t bn_elev = map->cells[best_ny][best_nx].elevation;
+        uint8_t nn_elev = map->cells[ny][nx].elevation;
+        if (bn_elev != nn_elev) {
+            bool has_ramp = ((map->cells[best_ny][best_nx].flags & TILE_FLAG_RAMP) != 0) ||
+                            ((map->cells[ny][nx].flags & TILE_FLAG_RAMP) != 0);
+            if (!has_ramp) continue;
+        }
+
+        uint16_t nd = map->path_field.dist[ny][nx];
+        if (nd >= best_dist) continue;
+
+        float edge_len = (n_dx[i] != 0 && n_dy[i] != 0) ? 1.4142f : 1.0f;
+        float progress = (float)(best_dist - nd) / edge_len;
+
+        if (progress > next_max_progress) {
+            next_max_progress = progress;
+            next_nx = nx;
+            next_ny = ny;
+        }
+    }
+
+    if (next_nx != best_nx || next_ny != best_ny) {
+        float n_wx = (next_nx == ptx && next_ny == pty) ? target_x : (next_nx + 0.5f) * TILE_WORLD_SIZE;
+        float n_wy = (next_nx == ptx && next_ny == pty) ? target_y : (next_ny + 0.5f) * TILE_WORLD_SIZE;
+        if (Tilemap_HasLineOfSight(map, from_x, from_y, n_wx, n_wy)) {
+            wx = n_wx;
+            wy = n_wy;
+        }
+    }
+
+    float to_wx = wx - from_x;
+    float to_wy = wy - from_y;
+    float wlen = sqrtf(to_wx * to_wx + to_wy * to_wy);
+    if (wlen > 0.001f) {
+        *out_dir_x = to_wx / wlen;
+        *out_dir_y = to_wy / wlen;
+    }
+
+    return false;
 }

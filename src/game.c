@@ -1268,6 +1268,7 @@ void Game_Update(GameState* game, float dt) {
     // PHASE 4: ENEMY AI & BULLET-HELL FIRING
     // -------------------------------------------------------------
     uint64_t t_e_start = Profiler_GetTimestamp();
+    Tilemap_UpdateFlowField(&game->tilemap, p->pos.x, p->pos.y);
     
     for (int k = 0; k < game->active_enemy_count; k++) {
         int i = game->active_enemy_indices[k];
@@ -1347,6 +1348,14 @@ void Game_Update(GameState* game, float dt) {
             dir_x = dx / dist;
             dir_y = dy / dist;
         }
+
+        bool can_fly = (cfg->move_pattern == ENEMY_MOVE_FLANK_ORBIT || cfg->attack_type == ENEMY_ATTACK_RANGED_GUST);
+        float move_dir_x = dir_x;
+        float move_dir_y = dir_y;
+        bool has_los = true;
+        if (!can_fly) {
+            has_los = Tilemap_GetPathDirection(&game->tilemap, e->pos.x, e->pos.y, p->pos.x, p->pos.y, &move_dir_x, &move_dir_y);
+        }
         
         switch (e->ai_state) {
             case ENEMY_AI_CHASE: {
@@ -1357,8 +1366,8 @@ void Game_Update(GameState* game, float dt) {
                 }
 
                 if (cfg->move_pattern == ENEMY_MOVE_CHARGER) {
-                    // Charger lines up, halts and winds up when within 230px
-                    if (e->attack_cooldown_timer <= 0.0f && dist <= 230.0f) {
+                    // Charger lines up, halts and winds up when within 230px and has line-of-sight
+                    if (e->attack_cooldown_timer <= 0.0f && dist <= 230.0f && (can_fly || has_los)) {
                         e->ai_state = ENEMY_AI_WINDUP;
                         e->state_timer = 0.85f; // Readable telegraph window
                         e->charge_dir = (Vec2){ dir_x, dir_y };
@@ -1384,7 +1393,8 @@ void Game_Update(GameState* game, float dt) {
                     }
                 } else if (cfg->attack_type != ENEMY_ATTACK_TOUCH_ONLY &&
                     e->attack_cooldown_timer <= 0.0f &&
-                    dist <= cfg->attack_range) {
+                    dist <= cfg->attack_range &&
+                    (can_fly || has_los)) {
                     
                     e->ai_state = ENEMY_AI_WINDUP;
                     e->state_timer = cfg->attack_windup;
@@ -1401,9 +1411,9 @@ void Game_Update(GameState* game, float dt) {
                 // Movement calculation based on pattern
                 if (cfg->move_pattern == ENEMY_MOVE_STATIONARY) {
                     // Metapod / Kakuna: barely moves (immovable bunker)
-                    e->vel.x = dir_x * (cfg->speed * 0.12f);
-                    e->vel.y = dir_y * (cfg->speed * 0.12f);
-                    e->anim.direction = Sprite_VecToDirection(dir_x, dir_y, e->anim.direction);
+                    e->vel.x = move_dir_x * (cfg->speed * 0.12f);
+                    e->vel.y = move_dir_y * (cfg->speed * 0.12f);
+                    e->anim.direction = Sprite_VecToDirection(move_dir_x, move_dir_y, e->anim.direction);
                     Sprite_UpdateAnim(&e->anim, &cfg->sprite, dt, true);
                 } else if (cfg->move_pattern == ENEMY_MOVE_FLANK_ORBIT) {
                     // Aerial circling: orbits around player, swooping in and out
@@ -1427,9 +1437,9 @@ void Game_Update(GameState* game, float dt) {
                     Sprite_UpdateAnim(&e->anim, &cfg->sprite, dt, true);
                 } else if (cfg->move_pattern == ENEMY_MOVE_MORTAR) {
                     if (dist > 360.0f) {
-                        e->vel.x = dir_x * (cfg->speed * 0.8f);
-                        e->vel.y = dir_y * (cfg->speed * 0.8f);
-                        e->anim.direction = Sprite_VecToDirection(dir_x, dir_y, e->anim.direction);
+                        e->vel.x = move_dir_x * (cfg->speed * 0.8f);
+                        e->vel.y = move_dir_y * (cfg->speed * 0.8f);
+                        e->anim.direction = Sprite_VecToDirection(move_dir_x, move_dir_y, e->anim.direction);
                         Sprite_UpdateAnim(&e->anim, &cfg->sprite, dt, true);
                     } else {
                         e->vel.x = 0.0f;
@@ -1439,9 +1449,9 @@ void Game_Update(GameState* game, float dt) {
                     }
                 } else {
                     // Standard swarm & burrow movement
-                    e->vel.x = dir_x * cfg->speed;
-                    e->vel.y = dir_y * cfg->speed;
-                    e->anim.direction = Sprite_VecToDirection(dir_x, dir_y, e->anim.direction);
+                    e->vel.x = move_dir_x * cfg->speed;
+                    e->vel.y = move_dir_y * cfg->speed;
+                    e->anim.direction = Sprite_VecToDirection(move_dir_x, move_dir_y, e->anim.direction);
                     Sprite_UpdateAnim(&e->anim, &cfg->sprite, dt, true);
                 }
                 break;
@@ -1577,9 +1587,9 @@ void Game_Update(GameState* game, float dt) {
             case ENEMY_AI_RETREAT: {
                 e->is_underground = true;
                 e->state_timer -= dt;
-                e->vel.x = -dir_x * (cfg->speed * 1.15f);
-                e->vel.y = -dir_y * (cfg->speed * 1.15f);
-                e->anim.direction = Sprite_VecToDirection(-dir_x, -dir_y, e->anim.direction);
+                e->vel.x = -move_dir_x * (cfg->speed * 1.15f);
+                e->vel.y = -move_dir_y * (cfg->speed * 1.15f);
+                e->anim.direction = Sprite_VecToDirection(-move_dir_x, -move_dir_y, e->anim.direction);
                 Sprite_UpdateAnim(&e->anim, &cfg->sprite, dt, true);
                 if (e->state_timer <= 0.0f) {
                     e->ai_state = ENEMY_AI_CHASE;
@@ -1609,7 +1619,6 @@ void Game_Update(GameState* game, float dt) {
         e->pos.x += e->vel.x * dt;
         e->pos.y += e->vel.y * dt;
         
-        bool can_fly = (cfg->move_pattern == ENEMY_MOVE_FLANK_ORBIT || cfg->attack_type == ENEMY_ATTACK_RANGED_GUST);
         Tilemap_CheckCollisionCircle(&game->tilemap, &e->pos.x, &e->pos.y, e->radius, can_fly);
         
         if (e->flash_timer > 0.0f) e->flash_timer -= dt;
@@ -1891,10 +1900,25 @@ void Game_Update(GameState* game, float dt) {
     if (p->invuln_timer <= 0.0f && !p->god_mode) {
         int touch_buf[64];
         int touched = Grid_QueryCircle(&g_grid, p->pos.x, p->pos.y, p->radius + 20.0f, touch_buf, 64);
+        int p_tx = (int)floorf(p->pos.x / TILE_WORLD_SIZE);
+        int p_ty = (int)floorf(p->pos.y / TILE_WORLD_SIZE);
+        uint8_t p_elev = (p_tx >= 0 && p_tx < MAP_TILES_X && p_ty >= 0 && p_ty < MAP_TILES_Y) ? game->tilemap.cells[p_ty][p_tx].elevation : 0;
+
         for (int k = 0; k < touched; k++) {
             int e_idx = touch_buf[k];
             Enemy* e = &game->enemies[e_idx];
             if (!e->active || e->is_underground || e->is_trapped) continue;
+
+            EnemyTypeConfig* ecfg = &game->enemy_types[e->type];
+            bool e_can_fly = (ecfg->move_pattern == ENEMY_MOVE_FLANK_ORBIT || ecfg->attack_type == ENEMY_ATTACK_RANGED_GUST);
+            if (!e_can_fly) {
+                int e_tx = (int)floorf(e->pos.x / TILE_WORLD_SIZE);
+                int e_ty = (int)floorf(e->pos.y / TILE_WORLD_SIZE);
+                uint8_t e_elev = (e_tx >= 0 && e_tx < MAP_TILES_X && e_ty >= 0 && e_ty < MAP_TILES_Y) ? game->tilemap.cells[e_ty][e_tx].elevation : 0;
+                bool on_ramp = ((game->tilemap.cells[p_ty][p_tx].flags & TILE_FLAG_RAMP) != 0) ||
+                               (e_tx >= 0 && e_tx < MAP_TILES_X && e_ty >= 0 && e_ty < MAP_TILES_Y && (game->tilemap.cells[e_ty][e_tx].flags & TILE_FLAG_RAMP) != 0);
+                if (!on_ramp && e_elev != p_elev) continue; // Ground entities cannot touch across elevation cliffs unless traversing a ramp
+            }
             
             float dx = e->pos.x - p->pos.x;
             float dy = e->pos.y - p->pos.y;

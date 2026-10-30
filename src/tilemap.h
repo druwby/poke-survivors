@@ -91,11 +91,19 @@ typedef struct {
     uint8_t overlay_id; // 255 for none, or TileIndex for overlay (e.g. decorative pebbles)
 } MapCell;
 
+typedef struct {
+    uint16_t dist[MAP_TILES_Y][MAP_TILES_X]; // Step distance to target (0xFFFF = unreachable)
+    int target_tile_x;                      // Target tile coordinate X
+    int target_tile_y;                      // Target tile coordinate Y
+    bool valid;                             // True if flow field is computed
+} PathField;
+
 typedef struct TileMap {
     MapCell cells[MAP_TILES_Y][MAP_TILES_X];
     SDL_Rect src_rects[TILE_TOTAL_COUNT];
     int current_section;
     int current_route;
+    PathField path_field;
 } TileMap;
 
 void Tilemap_Init(TileMap* map);
@@ -104,5 +112,10 @@ void Tilemap_Render(const TileMap* map, SDL_Renderer* renderer, SDL_Texture* til
 bool Tilemap_CheckCollisionCircle(const TileMap* map, float* pos_x, float* pos_y, float radius, bool can_fly);
 bool Tilemap_IsSolid(const TileMap* map, int tile_x, int tile_y, bool can_fly);
 const SDL_Rect* Tilemap_GetSrcRect(TileIndex index);
+
+// Dynamic Flow Field Pathfinding & Line-of-Sight
+void Tilemap_UpdateFlowField(TileMap* map, float target_x, float target_y);
+bool Tilemap_GetPathDirection(TileMap* map, float from_x, float from_y, float target_x, float target_y, float* out_dir_x, float* out_dir_y);
+bool Tilemap_HasLineOfSight(const TileMap* map, float x1, float y1, float x2, float y2);
 
 #endif // TILEMAP_H
