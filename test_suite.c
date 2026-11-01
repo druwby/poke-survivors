@@ -1113,6 +1113,338 @@ void test_tilemap_pathfinding_and_ramp_routing() {
     printf("  -> Flow field pathfinding, bidirectional ramp traversal, LoS, and touch damage verified!\n");
 }
 
+// Unit test 16: Procedural random terrain generation, all 6 biomes, and automatic ramp solver
+void test_procedural_generation_and_biomes() {
+    printf("[TEST] Running test_procedural_generation_and_biomes...\n");
+    TileMap map;
+    Tilemap_Init(&map);
+
+    // Verify all 6 biomes can be generated and queried
+    BiomeTheme b_plains = Tilemap_GetBiomeForRoute(0, 0);
+    BiomeTheme b_forest = Tilemap_GetBiomeForRoute(0, 2);
+    BiomeTheme b_cavern = Tilemap_GetBiomeForRoute(2, 2);
+    BiomeTheme b_coastal = Tilemap_GetBiomeForRoute(6, 2);
+    BiomeTheme b_volcanic = Tilemap_GetBiomeForRoute(6, 3);
+    BiomeTheme b_arena = Tilemap_GetBiomeForRoute(7, 3);
+
+    assert(b_plains == BIOME_PLAINS);
+    assert(b_forest == BIOME_FOREST);
+    assert(b_cavern == BIOME_CAVERN);
+    assert(b_coastal == BIOME_COASTAL);
+    assert(b_volcanic == BIOME_VOLCANIC);
+    assert(b_arena == BIOME_GYM_ARENA);
+
+    assert(strcmp(Tilemap_GetBiomeName(BIOME_PLAINS), "Plains / Meadow") == 0);
+    assert(strcmp(Tilemap_GetBiomeName(BIOME_FOREST), "Viridian Forest / Safari") == 0);
+    assert(strcmp(Tilemap_GetBiomeName(BIOME_CAVERN), "Cavern / Mt. Moon") == 0);
+    assert(strcmp(Tilemap_GetBiomeName(BIOME_COASTAL), "Coastal / Waterway") == 0);
+    assert(strcmp(Tilemap_GetBiomeName(BIOME_VOLCANIC), "Volcanic / Cinnabar") == 0);
+    assert(strcmp(Tilemap_GetBiomeName(BIOME_GYM_ARENA), "Gym Arena / Indigo Plateau") == 0);
+
+    // Generate each biome and verify valid terrain, ramps, central plaza safety, tall grass, and boulders
+    for (int s = 0; s < 8; s++) {
+        for (int r = 0; r < 4; r++) {
+            Tilemap_GenerateRouteMap(&map, s, r);
+
+            // 1. Central spawn plaza (around center) must be walkable
+            int cx = MAP_TILES_X / 2;
+            int cy = MAP_TILES_Y / 2;
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    uint8_t flags = map.cells[cy + dy][cx + dx].flags;
+                    assert(!(flags & TILE_FLAG_SOLID));
+                    assert(!(flags & TILE_FLAG_WATER));
+                }
+            }
+
+            // 2. Count ramps and verify ramp solver guarantees accessible ramps for EVERY plateau component
+            int ramp_count = 0;
+            for (int y = 0; y < MAP_TILES_Y; y++) {
+                for (int x = 0; x < MAP_TILES_X; x++) {
+                    if (map.cells[y][x].flags & TILE_FLAG_RAMP) {
+                        ramp_count++;
+                        // Ramp cell must not be solid or water
+                        assert(!(map.cells[y][x].flags & TILE_FLAG_SOLID));
+                        assert(!(map.cells[y][x].flags & TILE_FLAG_WATER));
+                        assert(map.cells[y][x].elevation == 1);
+
+                        // Verify ramp orientation connects ground to plateau
+                        int gx = x, gy = y;
+                        int px = x, py = y;
+                        if (map.cells[y][x].tile_id == TILE_ROCK_RAMP_S)      { gy++; py--; }
+                        else if (map.cells[y][x].tile_id == TILE_ROCK_RAMP_N) { gy--; py++; }
+                        else if (map.cells[y][x].tile_id == TILE_ROCK_RAMP_W) { gx--; px++; }
+                        else if (map.cells[y][x].tile_id == TILE_ROCK_RAMP_E) { gx++; px--; }
+
+                        assert(gx >= 1 && gx < MAP_TILES_X - 1 && gy >= 1 && gy < MAP_TILES_Y - 1);
+                        assert(px >= 1 && px < MAP_TILES_X - 1 && py >= 1 && py < MAP_TILES_Y - 1);
+                        assert(!(map.cells[gy][gx].flags & TILE_FLAG_SOLID));
+                        assert(!(map.cells[gy][gx].flags & TILE_FLAG_WATER));
+                        assert(map.cells[gy][gx].elevation == 0);
+                        assert(!(map.cells[py][px].flags & TILE_FLAG_SOLID));
+                        assert(map.cells[py][px].elevation == 1);
+                    }
+                }
+            }
+            assert(ramp_count >= 1); // Every route has carved stone ramps!
+
+            // Verify every disconnected plateau component has at least one ramp
+            uint8_t comp_vis[MAP_TILES_Y][MAP_TILES_X];
+            memset(comp_vis, 0, sizeof(comp_vis));
+            for (int sy = 2; sy < MAP_TILES_Y - 2; sy++) {
+                for (int sx = 2; sx < MAP_TILES_X - 2; sx++) {
+                    if (comp_vis[sy][sx] || map.cells[sy][sx].elevation != 1) continue;
+                    int comp_ramps = 0;
+                    uint16_t q[MAP_TILES_X * MAP_TILES_Y];
+                    int qh = 0, qt = 0;
+                    comp_vis[sy][sx] = 1;
+                    q[qt++] = (uint16_t)((sy << 7) | sx);
+                    while (qh < qt) {
+                        uint16_t cur = q[qh++];
+                        int cx = cur & 0x7F;
+                        int cy = (cur >> 7) & 0x7F;
+                        if (map.cells[cy][cx].flags & TILE_FLAG_RAMP) {
+                            comp_ramps++;
+                        }
+                        static const int c_dx[4] = { 0, 0, -1, 1 };
+                        static const int c_dy[4] = { -1, 1, 0, 0 };
+                        for (int i = 0; i < 4; i++) {
+                            int nx = cx + c_dx[i];
+                            int ny = cy + c_dy[i];
+                            if (nx >= 2 && nx < MAP_TILES_X - 2 && ny >= 2 && ny < MAP_TILES_Y - 2) {
+                                if (!comp_vis[ny][nx] && map.cells[ny][nx].elevation == 1) {
+                                    comp_vis[ny][nx] = 1;
+                                    q[qt++] = (uint16_t)((ny << 7) | nx);
+                                }
+                            }
+                        }
+                    }
+                    assert(comp_ramps >= 1); // Guaranteed ramp on every plateau component!
+                }
+            }
+
+            // 3. Tall grass exists in outdoor biomes
+            if (map.current_biome == BIOME_PLAINS || map.current_biome == BIOME_FOREST) {
+                int grass_count = 0;
+                for (int y = 0; y < MAP_TILES_Y; y++) {
+                    for (int x = 0; x < MAP_TILES_X; x++) {
+                        if (map.cells[y][x].flags & TILE_FLAG_TALL_GRASS) grass_count++;
+                    }
+                }
+                assert(grass_count > 0);
+            }
+
+            // 4. Boulders exist in rocky biomes
+            if (map.current_biome == BIOME_CAVERN || map.current_biome == BIOME_VOLCANIC) {
+                assert(map.boulder_count > 0);
+            }
+        }
+    }
+
+    // 5. Verify dynamic procedural generation creates unique layouts across different routes/seeds
+    TileMap map_vforest, map_safari;
+    Tilemap_GenerateRouteMap(&map_vforest, 0, 2); // Viridian Forest
+    Tilemap_GenerateRouteMap(&map_safari, 4, 2);  // Safari Zone
+    assert(map_vforest.current_biome == BIOME_FOREST);
+    assert(map_safari.current_biome == BIOME_FOREST);
+    assert(memcmp(map_vforest.cells, map_safari.cells, sizeof(map_vforest.cells)) != 0);
+
+    printf("  -> Procedural generation across all 6 biomes with ramp solver verified!\n");
+}
+
+// Unit test 17: Destructible boulder physics, damage absorption, and shatter
+void test_destructible_boulder_physics() {
+    printf("[TEST] Running test_destructible_boulder_physics...\n");
+    TileMap map;
+    Tilemap_Init(&map);
+    Tilemap_GenerateRouteMap(&map, 0, 0);
+
+    // Place boulder at (15, 15)
+    int init_count = map.boulder_count;
+    Tilemap_AddBoulder(&map, 15, 15, 60.0f);
+    assert(map.boulder_count == init_count + 1);
+    assert(map.cells[15][15].flags & TILE_FLAG_SOLID);
+    assert(map.cells[15][15].flags & TILE_FLAG_BOULDER);
+
+    DestructibleBoulder* bld = Tilemap_GetBoulderAt(&map, 15, 15);
+    assert(bld != NULL);
+    assert(bld->hp == 60.0f);
+    assert(bld->active);
+
+    // Deal partial damage
+    bool destroyed = false;
+    bool hit = Tilemap_DamageBoulder(&map, 15, 15, 25.0f, &destroyed);
+    assert(hit);
+    assert(!destroyed);
+    assert(bld->hp == 35.0f);
+    assert(bld->flash_timer > 0.0f);
+    assert(map.cells[15][15].flags & TILE_FLAG_SOLID); // Still solid obstacle!
+
+    // Deal lethal damage -> shatters!
+    map.path_field.valid = true;
+    hit = Tilemap_DamageBoulder(&map, 15, 15, 40.0f, &destroyed);
+    assert(hit);
+    assert(destroyed);
+    assert(!bld->active);
+    assert(!(map.cells[15][15].flags & TILE_FLAG_SOLID)); // Solid removed!
+    assert(!(map.cells[15][15].flags & TILE_FLAG_BOULDER)); // Boulder flag cleared!
+    assert(!map.path_field.valid); // Flow field invalidated to recalculate paths!
+
+    // Verify flash timer decrements in Game_Update
+    GameState b_game;
+    memset(&b_game, 0, sizeof(GameState));
+    b_game.app_state = APP_STATE_PLAYING;
+    Tilemap_Init(&b_game.tilemap);
+    Tilemap_AddBoulder(&b_game.tilemap, 20, 20, 50.0f);
+    Tilemap_DamageBoulder(&b_game.tilemap, 20, 20, 10.0f, &destroyed);
+    assert(b_game.tilemap.boulders[0].flash_timer > 0.0f);
+    Game_Update(&b_game, 0.20f);
+    assert(b_game.tilemap.boulders[0].flash_timer == 0.0f); // Flash timer expired cleanly!
+
+    printf("  -> Destructible boulder physics, collision, and shattering verified!\n");
+}
+
+// Unit test 18: Route Exit Gate (Poké-Portal) activation, HUD directional vector, and collision
+void test_route_exit_gate_and_progression() {
+    printf("[TEST] Running test_route_exit_gate_and_progression...\n");
+    TileMap map;
+    Tilemap_Init(&map);
+    Tilemap_GenerateRouteMap(&map, 0, 0);
+
+    assert(!map.exit_gate.active);
+
+    // Activate Route Exit Gate
+    Tilemap_ActivateExitGate(&map);
+    assert(map.exit_gate.active);
+    assert(map.exit_gate.radius > 20.0f);
+
+    // Gate position must be inside map bounds and in walkable cell
+    int gx = (int)(map.exit_gate.x / TILE_WORLD_SIZE);
+    int gy = (int)(map.exit_gate.y / TILE_WORLD_SIZE);
+    assert(gx >= 2 && gx < MAP_TILES_X - 2);
+    assert(gy >= 2 && gy < MAP_TILES_Y - 2);
+    assert(!(map.cells[gy][gx].flags & TILE_FLAG_SOLID));
+    assert(!(map.cells[gy][gx].flags & TILE_FLAG_WATER));
+
+    // Test Tilemap_GetGateDirection
+    float from_x = map.exit_gate.x - 100.0f;
+    float from_y = map.exit_gate.y;
+    float dir_x = 0.0f, dir_y = 0.0f, dist = 0.0f;
+    Tilemap_GetGateDirection(&map, from_x, from_y, &dir_x, &dir_y, &dist);
+    assert(fabsf(dist - 100.0f) < 0.1f);
+    assert(fabsf(dir_x - 1.0f) < 0.01f);
+    assert(fabsf(dir_y - 0.0f) < 0.01f);
+
+    // Test collision detection
+    // Far away: no collision
+    bool hit_far = Tilemap_CheckExitGateCollision(&map, from_x, from_y, 16.0f);
+    assert(!hit_far);
+
+    // Close / overlapping: collision triggers!
+    bool hit_gate = Tilemap_CheckExitGateCollision(&map, map.exit_gate.x, map.exit_gate.y, 16.0f);
+    assert(hit_gate);
+
+    printf("  -> Route exit gate Poké-Portal, HUD directional vector, and collision verified!\n");
+}
+
+// Unit test 19: Volcanic molten lava hazards and tall grass interactions
+void test_volcanic_lava_and_tall_grass_interactions() {
+    printf("[TEST] Running test_volcanic_lava_and_tall_grass_interactions...\n");
+    GameState game;
+    memset(&game, 0, sizeof(GameState));
+    game.app_state = APP_STATE_PLAYING;
+    game.player.pos = (Vec2){ 64.0f * TILE_WORLD_SIZE, 64.0f * TILE_WORLD_SIZE };
+    game.player.radius = 16.0f;
+    game.player.max_hp = 100.0f;
+    game.player.hp = 100.0f;
+    game.player.state = PLAYER_STATE_NORMAL;
+    game.route_timer = 999.0f;
+    game.route_kill_quota = 999;
+    Tilemap_Init(&game.tilemap);
+    Tilemap_GenerateRouteMap(&game.tilemap, 6, 3); // Cinnabar Gym (Volcanic Biome)
+    assert(game.tilemap.current_biome == BIOME_VOLCANIC);
+
+    // Find a lava tile
+    int lava_x = -1, lava_y = -1;
+    for (int y = 0; y < MAP_TILES_Y && lava_x < 0; y++) {
+        for (int x = 0; x < MAP_TILES_X; x++) {
+            if (game.tilemap.cells[y][x].flags & TILE_FLAG_WATER) {
+                lava_x = x;
+                lava_y = y;
+                break;
+            }
+        }
+    }
+    assert(lava_x > 0 && lava_y > 0);
+
+    // 1. Ground player touching lava pool takes burn damage
+    game.player.pos.x = (lava_x + 1.0f) * TILE_WORLD_SIZE + game.player.radius - 2.0f;
+    game.player.pos.y = (lava_y + 0.5f) * TILE_WORLD_SIZE;
+    float start_hp = game.player.hp;
+    Game_Update(&game, 0.1f);
+    assert(game.player.hp < start_hp); // Took lava burn damage!
+
+    // 2. Dashing player is invulnerable to lava
+    game.player.state = PLAYER_STATE_DASHING;
+    float dash_hp = game.player.hp;
+    Game_Update(&game, 0.1f);
+    assert(game.player.hp == dash_hp); // Immune while dashing!
+
+    // 3. Ground enemy near lava takes burn damage
+    game.active_enemy_count = 1;
+    game.active_enemy_indices[0] = 0;
+    Enemy* e = &game.enemies[0];
+    memset(e, 0, sizeof(Enemy));
+    e->active = true;
+    e->type = 0;
+    e->max_hp = 100.0f;
+    e->hp = 100.0f;
+    e->radius = 16.0f;
+    e->pos.x = (lava_x + 1.0f) * TILE_WORLD_SIZE + e->radius - 2.0f;
+    e->pos.y = (lava_y + 0.5f) * TILE_WORLD_SIZE;
+    game.enemy_types[0].move_pattern = ENEMY_MOVE_SWARM; // Ground swarm
+    game.enemy_types[0].attack_type = ENEMY_ATTACK_SLAM_AOE;
+    float e_start_hp = e->hp;
+    Game_Update(&game, 0.1f);
+    assert(e->hp < e_start_hp); // Ground enemy burned!
+
+    // 4. Flying enemy is immune to lava
+    game.enemy_types[0].move_pattern = ENEMY_MOVE_FLANK_ORBIT; // Flying pattern
+    float fly_start_hp = e->hp;
+    Game_Update(&game, 0.1f);
+    assert(e->hp == fly_start_hp); // Flying enemy immune to lava!
+
+    // 5. Tall grass interaction
+    TileMap grass_map;
+    Tilemap_Init(&grass_map);
+    Tilemap_GenerateRouteMap(&grass_map, 0, 2); // Viridian Forest
+    assert(grass_map.current_biome == BIOME_FOREST);
+    int grass_x = -1, grass_y = -1;
+    for (int y = 0; y < MAP_TILES_Y && grass_x < 0; y++) {
+        for (int x = 0; x < MAP_TILES_X; x++) {
+            if (grass_map.cells[y][x].flags & TILE_FLAG_TALL_GRASS) {
+                grass_x = x;
+                grass_y = y;
+                break;
+            }
+        }
+    }
+    assert(grass_x > 0 && grass_y > 0);
+
+    game.tilemap = grass_map;
+    game.player.pos = (Vec2){ (grass_x + 0.5f) * TILE_WORLD_SIZE, (grass_y + 0.5f) * TILE_WORLD_SIZE };
+    game.player.vel = (Vec2){ 0.0f, 0.0f };
+    game.player_grass_timer = 0.0f;
+    Game_Update(&game, 0.1f);
+    assert(game.player_grass_timer == 0.0f); // Still player does not rustle grass
+
+    game.player.vel = (Vec2){ 50.0f, 0.0f }; // Moving player rustles grass
+    Game_Update(&game, 0.2f);
+    assert(game.player_grass_timer > 0.0f);
+
+    printf("  -> Volcanic lava hazard and tall grass interactions verified!\n");
+}
+
 int main() {
     g_headless_sim = true;
     printf("=========================================\n");
@@ -1133,6 +1465,10 @@ int main() {
     test_tilemap_collision_and_ramp_traversal();
     test_tilemap_route_generation_across_all_routes();
     test_tilemap_pathfinding_and_ramp_routing();
+    test_procedural_generation_and_biomes();
+    test_destructible_boulder_physics();
+    test_route_exit_gate_and_progression();
+    test_volcanic_lava_and_tall_grass_interactions();
     printf("\n>>> ALL TESTS PASSED SUCCESSFULLY! <<<\n");
     return 0;
 }

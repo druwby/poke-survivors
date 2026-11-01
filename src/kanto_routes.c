@@ -4,6 +4,7 @@
 #include "sprite.h"
 #include "image_loader.h"
 #include "telemetry.h"
+#include "balance_sim.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -121,6 +122,16 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
 
     snprintf(game->route_banner_text, sizeof(game->route_banner_text), "%s", route->name);
     game->route_banner_timer = 3.5f;
+
+    // Reset player & party to central clearing plaza and trigger route fade transition
+    game->fade_alpha = 1.0f;
+    game->player.pos.x = WORLD_SIZE_X / 2.0f;
+    game->player.pos.y = WORLD_SIZE_Y / 2.0f;
+    game->camera.x = game->player.pos.x - WINDOW_WIDTH / 2.0f;
+    game->camera.y = game->player.pos.y - WINDOW_HEIGHT / 2.0f;
+    for (int i = 0; i < game->party_count; i++) {
+        game->party[i].pos = game->player.pos;
+    }
 
     // Generate thematic rich tilemap for this route
     Tilemap_GenerateRouteMap(&game->tilemap, section_idx, route_idx);
@@ -271,11 +282,18 @@ void KantoRoutes_LoadRoute(GameState* game, int section_idx, int route_idx) {
 }
 
 void KantoRoutes_AdvanceRoute(GameState* game) {
-    // Clear out active enemies from the completed route
+    // Clear out active enemies, projectiles, and hazards from the completed route
     for (int i = 0; i < MAX_ENEMIES; i++) {
         game->enemies[i].active = false;
     }
     game->active_enemy_count = 0;
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        game->projectiles[i].active = false;
+    }
+    for (int i = 0; i < MAX_GROUND_HAZARDS; i++) {
+        game->ground_hazards[i].active = false;
+    }
+    game->player_grass_timer = 0.0f;
 
     // Milestone Reward: Award +1 Poké Ball on route/milestone completion (max 2 held)
     if (game->player.pokeball_count < 2) {
@@ -360,19 +378,43 @@ void KantoRoutes_Update(GameState* game, float dt) {
                 }
             }
             if (!boss_alive) {
-                // Boss defeated! Heal player + give badge reward + advance
-                game->player.hp += 60.0f;
-                if (game->player.hp > game->player.max_hp) game->player.hp = game->player.max_hp;
-                game->player.xp += 150;
-                snprintf(game->route_banner_text, sizeof(game->route_banner_text), "BADGE ACQUIRED! SECTION CLEAR!");
-                game->route_banner_timer = 4.0f;
-                KantoRoutes_AdvanceRoute(game);
-                return;
+                // Boss defeated!
+                if (g_headless_sim) {
+                    game->player.hp += 60.0f;
+                    if (game->player.hp > game->player.max_hp) game->player.hp = game->player.max_hp;
+                    game->player.xp += 150;
+                    snprintf(game->route_banner_text, sizeof(game->route_banner_text), "BADGE ACQUIRED! SECTION CLEAR!");
+                    game->route_banner_timer = 4.0f;
+                    KantoRoutes_AdvanceRoute(game);
+                    return;
+                } else if (!game->tilemap.exit_gate.active) {
+                    game->player.hp += 60.0f;
+                    if (game->player.hp > game->player.max_hp) game->player.hp = game->player.max_hp;
+                    game->player.xp += 150;
+                    snprintf(game->route_banner_text, sizeof(game->route_banner_text), "BADGE ACQUIRED! POKÉ-PORTAL OPEN!");
+                    game->route_banner_timer = 5.0f;
+                    Tilemap_ActivateExitGate(&game->tilemap);
+                }
             }
         }
     } else {
         // Standard route: timed or kill milestone
         if (game->route_timer <= 0.0f || game->route_kills >= game->route_kill_quota) {
+            if (g_headless_sim) {
+                KantoRoutes_AdvanceRoute(game);
+                return;
+            } else if (!game->tilemap.exit_gate.active) {
+                snprintf(game->route_banner_text, sizeof(game->route_banner_text), "ROUTE CLEAR! POKÉ-PORTAL OPEN!");
+                game->route_banner_timer = 4.0f;
+                Tilemap_ActivateExitGate(&game->tilemap);
+            }
+        }
+    }
+
+    // Interactive exit gate / Poké-Portal collision check
+    if (game->tilemap.exit_gate.active) {
+        if (Tilemap_CheckExitGateCollision(&game->tilemap, game->player.pos.x, game->player.pos.y, game->player.radius)) {
+            game->fade_alpha = 1.0f;
             KantoRoutes_AdvanceRoute(game);
             return;
         }

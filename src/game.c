@@ -1164,6 +1164,90 @@ void Game_Update(GameState* game, float dt) {
         p->hp += p->hp_regen * dt;
         if (p->hp > p->max_hp) p->hp = p->max_hp;
     }
+
+    // Smooth route entrance fade transition
+    if (game->fade_alpha > 0.0f) {
+        game->fade_alpha -= dt * 2.0f;
+        if (game->fade_alpha < 0.0f) game->fade_alpha = 0.0f;
+    }
+
+    // Update Route Exit Gate / Poké-Portal animation timer
+    if (game->tilemap.exit_gate.active) {
+        game->tilemap.exit_gate.anim_timer += dt;
+    }
+
+    // Tick active destructible boulder flash timers
+    for (int b = 0; b < game->tilemap.boulder_count; b++) {
+        DestructibleBoulder* bld = &game->tilemap.boulders[b];
+        if (bld->active && bld->flash_timer > 0.0f) {
+            bld->flash_timer -= dt;
+        }
+    }
+
+    // Interactive terrain interactions: Tall Grass rustle / Oran berries & Volcanic Lava
+    int p_cell_x = (int)(p->pos.x / TILE_WORLD_SIZE);
+    int p_cell_y = (int)(p->pos.y / TILE_WORLD_SIZE);
+    if (p_cell_x >= 0 && p_cell_x < MAP_TILES_X && p_cell_y >= 0 && p_cell_y < MAP_TILES_Y) {
+        MapCell* cell = &game->tilemap.cells[p_cell_y][p_cell_x];
+        if (cell->flags & TILE_FLAG_TALL_GRASS) {
+            bool is_moving = (fabsf(p->vel.x) > 10.0f || fabsf(p->vel.y) > 10.0f);
+            if (is_moving) {
+                game->player_grass_timer += dt;
+                if (game->player_grass_timer >= 0.40f) {
+                    game->player_grass_timer = 0.0f;
+                    int roll = rand() % 100;
+                    if (roll < 20) {
+                        // Oran Berry heal! (+15 HP)
+                        float heal = 15.0f;
+                        p->hp += heal;
+                        if (p->hp > p->max_hp) p->hp = p->max_hp;
+                        Weapons_SpawnDamageText(game, (Vec2){ p->pos.x, p->pos.y - 18.0f }, heal, (SDL_Color){ 80, 255, 120, 255 });
+                    } else if (roll < 50) {
+                        // Bonus XP gem rustle! (+6 XP gem dropped)
+                        int xp_val = 6;
+                        SpawnGem(game, (Vec2){ p->pos.x + (rand() % 16 - 8), p->pos.y + (rand() % 16 - 8) }, xp_val);
+                        Weapons_SpawnDamageText(game, (Vec2){ p->pos.x, p->pos.y - 18.0f }, (float)xp_val, (SDL_Color){ 100, 220, 255, 255 });
+                    }
+                }
+            }
+        } else {
+            game->player_grass_timer = 0.0f;
+        }
+    }
+
+    // Volcanic Lava hazard deals damage to ground player touching lava pools (unless dashing or in god mode)
+    if (game->tilemap.current_biome == BIOME_VOLCANIC && p->state != PLAYER_STATE_DASHING && !p->god_mode && p->invuln_timer <= 0.0f) {
+        float touch_margin = p->radius + 4.0f;
+        int min_tx = (int)floorf((p->pos.x - touch_margin) / TILE_WORLD_SIZE);
+        int max_tx = (int)floorf((p->pos.x + touch_margin) / TILE_WORLD_SIZE);
+        int min_ty = (int)floorf((p->pos.y - touch_margin) / TILE_WORLD_SIZE);
+        int max_ty = (int)floorf((p->pos.y + touch_margin) / TILE_WORLD_SIZE);
+        bool touching_lava = false;
+        for (int ty = min_ty; ty <= max_ty && !touching_lava; ty++) {
+            for (int tx = min_tx; tx <= max_tx && !touching_lava; tx++) {
+                if (tx >= 0 && tx < MAP_TILES_X && ty >= 0 && ty < MAP_TILES_Y) {
+                    if (game->tilemap.cells[ty][tx].flags & TILE_FLAG_WATER) {
+                        float cx = fmaxf(tx * TILE_WORLD_SIZE, fminf(p->pos.x, (tx + 1) * TILE_WORLD_SIZE));
+                        float cy = fmaxf(ty * TILE_WORLD_SIZE, fminf(p->pos.y, (ty + 1) * TILE_WORLD_SIZE));
+                        float dx = p->pos.x - cx;
+                        float dy = p->pos.y - cy;
+                        if (dx * dx + dy * dy <= touch_margin * touch_margin) {
+                            touching_lava = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (touching_lava) {
+            float lava_dmg = 24.0f * dt;
+            p->hp -= lava_dmg;
+            p->damage_flash_timer = 0.08f;
+            if (p->hp <= 0.0f) {
+                p->hp = 0.0f;
+                game->app_state = APP_STATE_GAME_OVER;
+            }
+        }
+    }
     
     // Track Big Data Player Telemetry: Danger time (< 40% HP) and HP volatility
     if (p->hp > 0.0f) {
@@ -1242,6 +1326,27 @@ void Game_Update(GameState* game, float dt) {
                     Weapons_SpawnDamageText(game, e->pos, actual, (SDL_Color){ 0, 220, 255, 255 });
                     if (!e->active) {
                         k--;
+                    }
+                }
+            }
+
+            // Special Q damages and shatters nearby boulders
+            for (int b = 0; b < game->tilemap.boulder_count; b++) {
+                DestructibleBoulder* bld = &game->tilemap.boulders[b];
+                if (!bld->active || bld->flash_timer > 0.0f) continue;
+                float b_cx = (bld->tile_x + 0.5f) * TILE_WORLD_SIZE;
+                float b_cy = (bld->tile_y + 0.5f) * TILE_WORLD_SIZE;
+                float b_dx = b_cx - p->pos.x;
+                float b_dy = b_cy - p->pos.y;
+                float max_r = p->special_q_range + TILE_WORLD_SIZE * 0.5f;
+                if (b_dx * b_dx + b_dy * b_dy <= max_r * max_r) {
+                    float b_dmg = (p->special_q_damage * p->damage_mult) * (0.07f / 0.5f);
+                    bool shattered = false;
+                    Tilemap_DamageBoulder(&game->tilemap, bld->tile_x, bld->tile_y, b_dmg, &shattered);
+                    if (shattered) {
+                        SpawnGem(game, (Vec2){ b_cx, b_cy }, 8);
+                        SpawnGem(game, (Vec2){ b_cx + 8.0f, b_cy - 8.0f }, 5);
+                        Weapons_SpawnDamageText(game, (Vec2){ b_cx, b_cy - 18.0f }, 13.0f, (SDL_Color){ 255, 215, 0, 255 });
                     }
                 }
             }
@@ -1620,6 +1725,39 @@ void Game_Update(GameState* game, float dt) {
         e->pos.y += e->vel.y * dt;
         
         Tilemap_CheckCollisionCircle(&game->tilemap, &e->pos.x, &e->pos.y, e->radius, can_fly);
+
+        // Volcanic biome lava damage for non-flying ground enemies
+        if (game->tilemap.current_biome == BIOME_VOLCANIC && !can_fly && !e->is_underground) {
+            float touch_margin = e->radius + 4.0f;
+            int min_tx = (int)floorf((e->pos.x - touch_margin) / TILE_WORLD_SIZE);
+            int max_tx = (int)floorf((e->pos.x + touch_margin) / TILE_WORLD_SIZE);
+            int min_ty = (int)floorf((e->pos.y - touch_margin) / TILE_WORLD_SIZE);
+            int max_ty = (int)floorf((e->pos.y + touch_margin) / TILE_WORLD_SIZE);
+            bool near_lava = false;
+            for (int ty = min_ty; ty <= max_ty && !near_lava; ty++) {
+                for (int tx = min_tx; tx <= max_tx && !near_lava; tx++) {
+                    if (tx >= 0 && tx < MAP_TILES_X && ty >= 0 && ty < MAP_TILES_Y) {
+                        if (game->tilemap.cells[ty][tx].flags & TILE_FLAG_WATER) {
+                            float cx = fmaxf(tx * TILE_WORLD_SIZE, fminf(e->pos.x, (tx + 1) * TILE_WORLD_SIZE));
+                            float cy = fmaxf(ty * TILE_WORLD_SIZE, fminf(e->pos.y, (ty + 1) * TILE_WORLD_SIZE));
+                            float dx = e->pos.x - cx;
+                            float dy = e->pos.y - cy;
+                            if (dx * dx + dy * dy <= touch_margin * touch_margin) {
+                                near_lava = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if (near_lava) {
+                float burn_dmg = 24.0f * dt;
+                e->hp -= burn_dmg;
+                e->flash_timer = 0.08f;
+                if (e->hp <= 0.0f) {
+                    Game_ApplyEnemyDamage(game, i, 1.0f, "LAVA_BURN");
+                }
+            }
+        }
         
         if (e->flash_timer > 0.0f) e->flash_timer -= dt;
         if (e->orbiter_hit_cooldown > 0.0f) e->orbiter_hit_cooldown -= dt;
@@ -1891,6 +2029,41 @@ void Game_Update(GameState* game, float dt) {
                 if (proj->pierce_left <= 0) {
                     proj->active = false;
                     break;
+                }
+            }
+        }
+
+        // Check projectile collision against destructible boulders
+        if (proj->active && !proj->is_enemy && proj->damage > 0.0f) {
+            for (int b = 0; b < game->tilemap.boulder_count; b++) {
+                DestructibleBoulder* bld = &game->tilemap.boulders[b];
+                if (!bld->active) continue;
+                float b_cx = (bld->tile_x + 0.5f) * TILE_WORLD_SIZE;
+                float b_cy = (bld->tile_y + 0.5f) * TILE_WORLD_SIZE;
+                float b_rad = TILE_WORLD_SIZE * 0.5f;
+                float b_dx = b_cx - proj->pos.x;
+                float b_dy = b_cy - proj->pos.y;
+                float b_hit_rad = proj->radius + b_rad;
+                if (b_dx * b_dx + b_dy * b_dy <= b_hit_rad * b_hit_rad) {
+                    if (proj->type == PROJ_ORBITER && bld->flash_timer > 0.0f) {
+                        continue;
+                    }
+                    float dmg = proj->damage;
+                    bool shattered = false;
+                    Tilemap_DamageBoulder(&game->tilemap, bld->tile_x, bld->tile_y, dmg, &shattered);
+                    Weapons_SpawnDamageText(game, (Vec2){ b_cx, b_cy - 12.0f }, dmg, (SDL_Color){ 220, 220, 220, 255 });
+                    if (shattered) {
+                        SpawnGem(game, (Vec2){ b_cx, b_cy }, 8);
+                        SpawnGem(game, (Vec2){ b_cx + 8.0f, b_cy - 8.0f }, 6);
+                        Weapons_SpawnDamageText(game, (Vec2){ b_cx, b_cy - 22.0f }, 14.0f, (SDL_Color){ 255, 215, 0, 255 });
+                    }
+                    if (proj->type != PROJ_ORBITER) {
+                        proj->pierce_left--;
+                        if (proj->pierce_left <= 0) {
+                            proj->active = false;
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -2899,6 +3072,53 @@ void Game_Draw(GameState* game) {
         snprintf(stats, sizeof(stats), "Final Level: %d  |  Total Kills: %d", p->level, p->kills);
         Font_DrawText(renderer, game->font_texture, stats, 480, 290, 1, (SDL_Color){ 255, 255, 255, 255 });
         Font_DrawTextShadow(renderer, game->font_texture, "Press [R] or [SPACE] to Play Again", 460, 350, 2, (SDL_Color){ 255, 230, 80, 255 });
+    }
+
+    // Poké-Portal Directional HUD Indicator
+    if (game->tilemap.exit_gate.active && game->app_state == APP_STATE_PLAYING) {
+        float dir_x = 0.0f, dir_y = 0.0f, dist = 0.0f;
+        Tilemap_GetGateDirection(&game->tilemap, p->pos.x, p->pos.y, &dir_x, &dir_y, &dist);
+
+        int hud_w = 260;
+        int hud_h = 32;
+        int hud_x = (WINDOW_WIDTH - hud_w) / 2;
+        int hud_y = 86;
+
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 12, 18, 30, 230);
+        SDL_Rect h_rect = { hud_x, hud_y, hud_w, hud_h };
+        SDL_RenderFillRect(renderer, &h_rect);
+        SDL_SetRenderDrawColor(renderer, 60, 220, 255, 240);
+        SDL_RenderDrawRect(renderer, &h_rect);
+
+        // Arrow indicator pointing towards exit gate
+        int arrow_cx = hud_x + 22;
+        int arrow_cy = hud_y + 16;
+        int tip_x = arrow_cx + (int)(dir_x * 11.0f);
+        int tip_y = arrow_cy + (int)(dir_y * 11.0f);
+        int base_x = arrow_cx - (int)(dir_x * 7.0f);
+        int base_y = arrow_cy - (int)(dir_y * 7.0f);
+        int side_x = (int)(-dir_y * 6.0f);
+        int side_y = (int)(dir_x * 6.0f);
+
+        SDL_SetRenderDrawColor(renderer, 255, 235, 60, 255);
+        SDL_RenderDrawLine(renderer, tip_x, tip_y, base_x + side_x, base_y + side_y);
+        SDL_RenderDrawLine(renderer, tip_x, tip_y, base_x - side_x, base_y - side_y);
+        SDL_RenderDrawLine(renderer, base_x + side_x, base_y + side_y, arrow_cx, arrow_cy);
+        SDL_RenderDrawLine(renderer, base_x - side_x, base_y - side_y, arrow_cx, arrow_cy);
+
+        char gate_txt[64];
+        snprintf(gate_txt, sizeof(gate_txt), "POKÉ-PORTAL: %dm", (int)(dist / 16.0f));
+        Font_DrawTextShadow(renderer, game->font_texture, gate_txt, hud_x + 40, hud_y + 8, 1, (SDL_Color){ 100, 240, 255, 255 });
+    }
+
+    // Fullscreen Route Fade Overlay
+    if (game->fade_alpha > 0.001f) {
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        Uint8 alpha = (Uint8)(game->fade_alpha >= 1.0f ? 255 : (game->fade_alpha * 255.0f));
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, alpha);
+        SDL_Rect f_rect = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
+        SDL_RenderFillRect(renderer, &f_rect);
     }
 
     // 9. Draw Profiler Overlay

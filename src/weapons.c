@@ -1438,6 +1438,46 @@ void Weapons_Update(GameState* game, float dt) {
                     }
                 }
             }
+
+            // Vine whip damage against destructible boulders
+            for (int b = 0; b < game->tilemap.boulder_count; b++) {
+                DestructibleBoulder* bld = &game->tilemap.boulders[b];
+                if (!bld->active || bld->flash_timer > 0.0f) continue;
+                float b_cx = (bld->tile_x + 0.5f) * TILE_WORLD_SIZE;
+                float b_cy = (bld->tile_y + 0.5f) * TILE_WORLD_SIZE;
+                float t = 0.0f;
+                if (seg_len_sq > 0.001f) {
+                    t = ((b_cx - p1.x) * seg_dx + (b_cy - p1.y) * seg_dy) / seg_len_sq;
+                    if (t < 0.0f) t = 0.0f;
+                    if (t > 1.0f) t = 1.0f;
+                }
+                float close_x = p1.x + t * seg_dx;
+                float close_y = p1.y + t * seg_dy;
+                float cdx = b_cx - close_x;
+                float cdy = b_cy - close_y;
+                float dist_sq = cdx * cdx + cdy * cdy;
+                float hit_r = 34.0f + TILE_WORLD_SIZE * 0.5f;
+                if (dist_sq <= hit_r * hit_r) {
+                    float dmg = vs->damage;
+                    bool shattered = false;
+                    Tilemap_DamageBoulder(&game->tilemap, bld->tile_x, bld->tile_y, dmg, &shattered);
+                    Weapons_SpawnDamageText(game, (Vec2){ b_cx, b_cy - 12.0f }, dmg, (SDL_Color){ 80, 245, 80, 255 });
+                    if (shattered) {
+                        for (int g = 0; g < MAX_GEMS; g++) {
+                            if (!game->gems[g].active) {
+                                game->gems[g].active = true;
+                                game->gems[g].pos = (Vec2){ b_cx, b_cy };
+                                game->gems[g].vel = (Vec2){ 0.0f, 0.0f };
+                                game->gems[g].value = 8;
+                                game->gems[g].radius = 7.0f;
+                                game->gems[g].being_pulled = false;
+                                break;
+                            }
+                        }
+                        Weapons_SpawnDamageText(game, (Vec2){ b_cx, b_cy - 20.0f }, 8.0f, (SDL_Color){ 255, 215, 0, 255 });
+                    }
+                }
+            }
         }
     }
 

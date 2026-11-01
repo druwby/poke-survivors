@@ -600,6 +600,8 @@ typedef struct {
     bool gym_boss_spawned;
     float route_banner_timer;
     char route_banner_text[64];
+    float fade_alpha;
+    float player_grass_timer;
     
     Vec2 camera;
     Vec2 mouse_pos;

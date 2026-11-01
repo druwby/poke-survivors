@@ -20,6 +20,19 @@
 #define TILE_FLAG_PATH       0x08 // Pathway / road
 #define TILE_FLAG_PLATEAU    0x10 // Elevated plateau flat ground
 #define TILE_FLAG_DECO       0x20 // Decorative overlay (pebbles, flora)
+#define TILE_FLAG_TALL_GRASS 0x40 // Interactive tall grass terrain (rustles, bonus XP/berries)
+#define TILE_FLAG_BOULDER    0x80 // Destructible natural rock obstacle
+
+// Biome Theme Types
+typedef enum {
+    BIOME_PLAINS = 0,     // Classic open terrain, rolling plateaus, flower patches
+    BIOME_FOREST = 1,     // Dense trees, winding pathways, tall grass clearings
+    BIOME_CAVERN = 2,     // Dark cavern stone, underground springs, narrow rocky corridors
+    BIOME_COASTAL = 3,    // Sandy shores, channels, island plateaus
+    BIOME_VOLCANIC = 4,   // Dark basalt rocks, glowing lava hazards
+    BIOME_GYM_ARENA = 5,  // Ceremonial stone pathways, battle ring, reflection pools
+    BIOME_COUNT
+} BiomeTheme;
 
 // Tile indices corresponding to exact 24x24 slices of assets/tilesets/tileset1.png (432x192)
 typedef enum {
@@ -80,6 +93,9 @@ typedef enum {
     TILE_DECO_PEBBLE_2,     // src { 360,  72, 24, 24 } - Natural pebble / gravel terrain 2
     TILE_DECO_PEBBLE_3,     // src { 384,  96, 24, 24 } - Natural pebble / gravel terrain 3
     TILE_DECO_FLOWER,       // src { 312,  72, 24, 24 } - Wild roadside flora / decorative patch
+    TILE_TALL_GRASS,        // src { 336,  72, 24, 24 } - Wild interactive tall grass clump
+    TILE_PORTAL_GATE,       // src { 384,  48, 24, 24 } - Route exit portal gate
+    TILE_LAVA_CENTER,       // src { 168,  72, 24, 24 } - Volcanic molten lava body
 
     TILE_TOTAL_COUNT
 } TileIndex;
@@ -88,7 +104,7 @@ typedef struct {
     uint8_t tile_id;    // TileIndex
     uint8_t flags;      // TILE_FLAG_*
     uint8_t elevation;  // 0: ground level, 1: elevated plateau
-    uint8_t overlay_id; // 255 for none, or TileIndex for overlay (e.g. decorative pebbles)
+    uint8_t overlay_id; // 255 for none, or TileIndex for overlay (e.g. decorative pebbles, tall grass)
 } MapCell;
 
 typedef struct {
@@ -98,12 +114,42 @@ typedef struct {
     bool valid;                             // True if flow field is computed
 } PathField;
 
+#define MAX_BOULDERS 64
+
+typedef struct {
+    bool active;
+    int tile_x;
+    int tile_y;
+    float hp;
+    float max_hp;
+    float flash_timer;
+} DestructibleBoulder;
+
+typedef struct {
+    bool active;
+    float x;            // World center pos X
+    float y;            // World center pos Y
+    int tile_x;
+    int tile_y;
+    float radius;       // 48.0f
+    float anim_timer;
+    bool player_entered;
+} RouteExitGate;
+
 typedef struct TileMap {
     MapCell cells[MAP_TILES_Y][MAP_TILES_X];
     SDL_Rect src_rects[TILE_TOTAL_COUNT];
     int current_section;
     int current_route;
+    BiomeTheme current_biome;
     PathField path_field;
+
+    // Interactive Points of Interest
+    DestructibleBoulder boulders[MAX_BOULDERS];
+    int boulder_count;
+
+    // Seamless Route Progression Gate
+    RouteExitGate exit_gate;
 } TileMap;
 
 void Tilemap_Init(TileMap* map);
@@ -117,5 +163,23 @@ const SDL_Rect* Tilemap_GetSrcRect(TileIndex index);
 void Tilemap_UpdateFlowField(TileMap* map, float target_x, float target_y);
 bool Tilemap_GetPathDirection(TileMap* map, float from_x, float from_y, float target_x, float target_y, float* out_dir_x, float* out_dir_y);
 bool Tilemap_HasLineOfSight(const TileMap* map, float x1, float y1, float x2, float y2);
+
+// Interactive Points of Interest: Destructible Boulders
+void Tilemap_AddBoulder(TileMap* map, int x, int y, float hp);
+bool Tilemap_DamageBoulder(TileMap* map, int tile_x, int tile_y, float damage, bool* out_destroyed);
+bool Tilemap_DestroyBoulder(TileMap* map, int tile_x, int tile_y);
+DestructibleBoulder* Tilemap_GetBoulderAt(TileMap* map, int tile_x, int tile_y);
+
+// Seamless Route Progression: Route Exit Gate / Poké-Portal
+void Tilemap_ActivateExitGate(TileMap* map);
+bool Tilemap_CheckExitGateCollision(const TileMap* map, float player_x, float player_y, float player_radius);
+void Tilemap_GetGateDirection(const TileMap* map, float from_x, float from_y, float* out_dir_x, float* out_dir_y, float* out_dist);
+
+// Biome Query
+BiomeTheme Tilemap_GetBiomeForRoute(int section_idx, int route_idx);
+const char* Tilemap_GetBiomeName(BiomeTheme biome);
+
+// Automatic Ramp Solver
+void Tilemap_SolvePlateauRamps(TileMap* map);
 
 #endif // TILEMAP_H
