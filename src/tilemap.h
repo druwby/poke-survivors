@@ -156,8 +156,13 @@ void Tilemap_Init(TileMap* map);
 void Tilemap_GenerateRouteMap(TileMap* map, int section_idx, int route_idx);
 void Tilemap_Render(const TileMap* map, SDL_Renderer* renderer, SDL_Texture* tileset_tex, float camera_x, float camera_y);
 bool Tilemap_CheckCollisionCircle(const TileMap* map, float* pos_x, float* pos_y, float radius, bool can_fly);
+bool Tilemap_CheckCollisionCircle3D(const TileMap* map, float* pos_x, float* pos_y, float* pos_z, float radius, float step_height, bool can_fly);
 bool Tilemap_IsSolid(const TileMap* map, int tile_x, int tile_y, bool can_fly);
 const SDL_Rect* Tilemap_GetSrcRect(TileIndex index);
+
+// 3D Multi-Tier Terrain & Stepping Stones
+void Tilemap_AddTieredPlateau(TileMap* map, int x, int y, int w, int h, int base_elev, int top_elev, int ramp_edge, int ramp_pos);
+void Tilemap_AddSteppingPillars(TileMap* map, int start_x, int start_y, int count, int dx, int dy, int pillar_size, int elevation);
 
 // Dynamic Flow Field Pathfinding & Line-of-Sight
 void Tilemap_UpdateFlowField(TileMap* map, float target_x, float target_y);

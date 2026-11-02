@@ -1,5 +1,7 @@
 #include "camera3d.h"
 #include "sprite.h"
+#include "types.h"
+#include "render3d.h"
 #include <math.h>
 #include <string.h>
 
@@ -19,12 +21,13 @@ void Camera3D_Init(Camera3D* cam, ViewMode initial_mode) {
     cam->aspect = (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT;
     cam->near_z = 8.0f;
     cam->far_z = 2400.0f;
-    cam->fov = 68.0f * ((float)M_PI / 180.0f);
+    cam->fov = 72.0f * ((float)M_PI / 180.0f);
     cam->focal_length = ((float)WINDOW_HEIGHT * 0.5f) / tanf(cam->fov * 0.5f);
     
-    cam->mouse_sensitivity = 0.0045f;
+    cam->mouse_sensitivity = 0.0032f;
     cam->key_orbit_speed = 2.4f;
     cam->smooth_follow_enabled = true;
+    cam->auto_align_yaw = false; // Player controls camera orientation 100% via mouse-look
     
     Camera3D_SetMode(cam, initial_mode);
 }
@@ -34,12 +37,12 @@ void Camera3D_SetMode(Camera3D* cam, ViewMode new_mode) {
     cam->mode = new_mode;
     
     if (cam->mode == VIEW_3D_THIRD_PERSON) {
-        cam->target_distance = 420.0f;
-        cam->distance = 420.0f;
-        cam->target_pitch = 0.54f; // ~31 degrees downward
-        cam->pitch = 0.54f;
-        cam->height_offset = 26.0f;
-        cam->fov = 68.0f * ((float)M_PI / 180.0f);
+        cam->target_distance = 360.0f;
+        cam->distance = 360.0f;
+        cam->target_pitch = 0.38f; // ~22 degrees downward tilt for true over-the-shoulder look
+        cam->pitch = 0.38f;
+        cam->height_offset = 28.0f;
+        cam->fov = 72.0f * ((float)M_PI / 180.0f);
     } else if (cam->mode == VIEW_3D_TOPDOWN) {
         cam->target_distance = 620.0f;
         cam->distance = 620.0f;
@@ -135,9 +138,9 @@ void Camera3D_Update(Camera3D* cam, Vec3 player_pos, float dt) {
         cam->distance += (cam->target_distance - cam->distance) * zoom_speed;
     }
     
-    // Clamp pitch to prevent flipping
-    cam->pitch = CLAMP(cam->pitch, 0.12f, 1.35f);
-    cam->target_pitch = CLAMP(cam->target_pitch, 0.12f, 1.35f);
+    // Clamp pitch to prevent flipping (-0.40 rad up to 1.38 rad down)
+    cam->pitch = CLAMP(cam->pitch, -0.40f, 1.38f);
+    cam->target_pitch = CLAMP(cam->target_pitch, -0.40f, 1.38f);
     
     // Smooth yaw & pitch
     if (dt > 0.0001f) {
@@ -196,7 +199,7 @@ void Camera3D_HandleEvent(Camera3D* cam, const SDL_Event* event) {
             
             cam->target_yaw += (float)dx * cam->mouse_sensitivity;
             cam->target_pitch += (float)dy * cam->mouse_sensitivity;
-            cam->target_pitch = CLAMP(cam->target_pitch, 0.12f, 1.35f);
+            cam->target_pitch = CLAMP(cam->target_pitch, -0.40f, 1.38f);
         }
     } else if (event->type == SDL_MOUSEWHEEL) {
         // Zoom in/out with scroll wheel
@@ -220,11 +223,11 @@ void Camera3D_HandleInput(Camera3D* cam, const Uint8* keystate, float dt) {
     }
     if (keystate[SDL_SCANCODE_UP]) {
         cam->target_pitch -= orbit_delta * 0.65f;
-        cam->target_pitch = CLAMP(cam->target_pitch, 0.12f, 1.35f);
+        cam->target_pitch = CLAMP(cam->target_pitch, -0.40f, 1.38f);
     }
     if (keystate[SDL_SCANCODE_DOWN]) {
         cam->target_pitch += orbit_delta * 0.65f;
-        cam->target_pitch = CLAMP(cam->target_pitch, 0.12f, 1.35f);
+        cam->target_pitch = CLAMP(cam->target_pitch, -0.40f, 1.38f);
     }
     
     // Zoom in/out via PageUp / PageDown or Keypad +/-
@@ -346,4 +349,101 @@ void Camera3D_GetMovementVector(const Camera3D* cam, float input_forward, float 
     // Forward is (sy, -cy), Right is (cy, sy)
     *out_vx = input_forward * sy + input_right * cy;
     *out_vz = input_forward * (-cy) + input_right * sy;
+}
+
+bool Camera3D_RaycastCrosshair(const Camera3D* cam, const TileMap* map, const GameState* game, Vec3* out_hit_pos, int* out_enemy_idx) {
+    if (!cam || !out_hit_pos) return false;
+    
+    Vec3 r_orig = cam->pos;
+    Vec3 r_dir = cam->forward;
+    
+    int best_e = -1;
+    float best_t = 2400.0f;
+    
+    // 1. Raycast against active enemies (bounding sphere query)
+    if (game) {
+        for (int k = 0; k < game->active_enemy_count; k++) {
+            int e_idx = game->active_enemy_indices[k];
+            const Enemy* e = &game->enemies[e_idx];
+            if (!e->active || e->is_underground) continue;
+            
+            float eh = map ? Render3D_GetTerrainHeight(map, e->pos.x, e->pos.y) : 0.0f;
+            if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_FLANK_ORBIT) {
+                eh += 24.0f + sinf(game->spawner.game_time * 4.0f + (float)k) * 6.0f;
+            }
+            float r = game->enemy_types[e->type].radius + 8.0f;
+            Vec3 sc = { e->pos.x, eh + r, e->pos.y };
+            
+            Vec3 oc = { sc.x - r_orig.x, sc.y - r_orig.y, sc.z - r_orig.z };
+            float tca = oc.x * r_dir.x + oc.y * r_dir.y + oc.z * r_dir.z;
+            if (tca < 10.0f) continue;
+            
+            float d2 = (oc.x * oc.x + oc.y * oc.y + oc.z * oc.z) - tca * tca;
+            if (d2 <= r * r) {
+                float thc = sqrtf(r * r - d2);
+                float t0 = tca - thc;
+                if (t0 > 0.0f && t0 < best_t) {
+                    best_t = t0;
+                    best_e = e_idx;
+                }
+            }
+        }
+    }
+    
+    // 2. Raycast against terrain heightfield
+    float terrain_t = 9999.0f;
+    Vec3 terrain_hit = { 0 };
+    bool hit_terrain = false;
+
+    if (map) {
+        float step = 16.0f;
+        float max_dist = 1400.0f;
+        Vec3 prev_p = r_orig;
+        
+        for (float t = 16.0f; t <= max_dist; t += step) {
+            Vec3 cur_p = {
+                r_orig.x + r_dir.x * t,
+                r_orig.y + r_dir.y * t,
+                r_orig.z + r_dir.z * t
+            };
+            
+            float gh = Render3D_GetTerrainHeight(map, cur_p.x, cur_p.z);
+            if (cur_p.y <= gh) {
+                float t_prev = t - step;
+                float frac = (prev_p.y - gh) / ((prev_p.y - gh) + (gh - cur_p.y) + 1e-5f);
+                if (frac < 0.0f) frac = 0.0f;
+                if (frac > 1.0f) frac = 1.0f;
+                terrain_t = t_prev + step * frac;
+                
+                terrain_hit.x = r_orig.x + r_dir.x * terrain_t;
+                terrain_hit.y = gh;
+                terrain_hit.z = r_orig.z + r_dir.z * terrain_t;
+                hit_terrain = true;
+                break;
+            }
+            prev_p = cur_p;
+        }
+    }
+
+    // Prioritize visible enemy if not occluded behind terrain
+    if (best_e >= 0 && (!hit_terrain || best_t <= terrain_t + 12.0f)) {
+        out_hit_pos->x = r_orig.x + r_dir.x * best_t;
+        out_hit_pos->y = r_orig.y + r_dir.y * best_t;
+        out_hit_pos->z = r_orig.z + r_dir.z * best_t;
+        if (out_enemy_idx) *out_enemy_idx = best_e;
+        return true;
+    }
+    
+    if (out_enemy_idx) *out_enemy_idx = -1;
+
+    if (hit_terrain) {
+        *out_hit_pos = terrain_hit;
+        return true;
+    }
+    
+    // 3. Open sky / horizon fallback
+    out_hit_pos->x = r_orig.x + r_dir.x * 850.0f;
+    out_hit_pos->y = r_orig.y + r_dir.y * 850.0f;
+    out_hit_pos->z = r_orig.z + r_dir.z * 850.0f;
+    return true;
 }

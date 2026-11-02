@@ -275,6 +275,16 @@ typedef struct {
     Vec2 aim_dir;
     int pokeball_count; // Number of available Poké Balls to catch wild Pokémon (max 2)
 
+    // 3D Vertical Physics & Jumping (Risk of Rain 2 Style)
+    float y;                   // 3D vertical elevation (height above ground)
+    float vy;                  // 3D vertical velocity (+ is upward)
+    bool is_grounded;          // True when standing on ground/plateau
+    float jump_power;          // Initial jump impulse (default: 380.0 px/s)
+    float gravity;             // Gravity acceleration (default: 900.0 px/s^2)
+    float coyote_timer;        // Forgiveness window after stepping off ledges (default: 0.12s)
+    Vec3 aim_target_3d;        // 3D world space crosshair target
+    Vec3 aim_dir_3d;           // 3D unit direction from player chest to crosshair target
+
     SpriteSheet sprite;          // default walk sprite
     SpriteSheet sprite_charge;   // Charge-Anim.png for Dash
     SpriteSheet sprite_special;  // Withdraw / Attack for Special Q
@@ -428,6 +438,8 @@ typedef struct {
     ProjectileType type;
     Vec2 pos;
     Vec2 vel;
+    float y;              // 3D vertical elevation
+    float vy;             // 3D vertical velocity
     float radius;
     float damage;
     float lifetime;
@@ -578,7 +590,7 @@ typedef struct {
     SDL_Color color;
 } LevelUpCard;
 
-typedef struct {
+typedef struct GameState {
     SDL_Window* window;
     SDL_Renderer* renderer;
     bool running;
@@ -608,6 +620,12 @@ typedef struct {
     Camera3D camera3d;
     Vec2 mouse_pos;
     bool mouse_active;
+    
+    // 3D Third-Person Risk of Rain 2 Crosshair & Mouse State
+    bool relative_mouse_mode;
+    float hitmarker_timer;
+    int crosshair_target_enemy;
+    Vec3 crosshair_aim_world;
     
     Player player;
     PartyMember party[MAX_PARTY_MEMBERS];

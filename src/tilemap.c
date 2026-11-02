@@ -243,6 +243,70 @@ static void Tilemap_AddPlateau(TileMap* map, int x1, int y1, int w, int h, int r
     }
 }
 
+void Tilemap_AddTieredPlateau(TileMap* map, int x, int y, int w, int h, int base_elev, int top_elev, int ramp_edge, int ramp_pos) {
+    if (!map || w < 2 || h < 2) return;
+    int x1 = x, x2 = x + w - 1;
+    int y1 = y, y2 = y + h - 1;
+    if (x1 < 2) x1 = 2;
+    if (x2 >= MAP_TILES_X - 2) x2 = MAP_TILES_X - 3;
+    if (y1 < 2) y1 = 2;
+    if (y2 >= MAP_TILES_Y - 2) y2 = MAP_TILES_Y - 3;
+    
+    int rx = -1, ry = -1;
+    if (top_elev > base_elev && ramp_edge > 0) {
+        if (ramp_edge == 1) { // South edge
+            rx = x1 + 1 + (ramp_pos % (w > 2 ? w - 2 : 1));
+            ry = y2;
+        } else if (ramp_edge == 2) { // North edge
+            rx = x1 + 1 + (ramp_pos % (w > 2 ? w - 2 : 1));
+            ry = y1;
+        } else if (ramp_edge == 3) { // West edge
+            rx = x1;
+            ry = y1 + 1 + (ramp_pos % (h > 2 ? h - 2 : 1));
+        } else if (ramp_edge == 4) { // East edge
+            rx = x2;
+            ry = y1 + 1 + (ramp_pos % (h > 2 ? h - 2 : 1));
+        }
+    }
+    
+    for (int cy = y1; cy <= y2; cy++) {
+        for (int cx = x1; cx <= x2; cx++) {
+            MapCell* c = &map->cells[cy][cx];
+            c->elevation = (uint8_t)top_elev;
+            c->flags = TILE_FLAG_PLATEAU;
+            c->tile_id = TILE_ROCK_CENTER;
+            c->overlay_id = 255;
+            if (cx == rx && cy == ry) {
+                if (ramp_edge == 1)      c->tile_id = TILE_ROCK_RAMP_S;
+                else if (ramp_edge == 2) c->tile_id = TILE_ROCK_RAMP_N;
+                else if (ramp_edge == 3) c->tile_id = TILE_ROCK_RAMP_W;
+                else                     c->tile_id = TILE_ROCK_RAMP_E;
+                c->flags = TILE_FLAG_RAMP;
+                c->elevation = (uint8_t)top_elev;
+            }
+        }
+    }
+}
+
+void Tilemap_AddSteppingPillars(TileMap* map, int start_x, int start_y, int count, int dx, int dy, int pillar_size, int elevation) {
+    if (!map) return;
+    for (int p = 0; p < count; p++) {
+        int px = start_x + p * dx;
+        int py = start_y + p * dy;
+        for (int y = py; y < py + pillar_size; y++) {
+            for (int x = px; x < px + pillar_size; x++) {
+                if (x >= 2 && x < MAP_TILES_X - 2 && y >= 2 && y < MAP_TILES_Y - 2) {
+                    MapCell* c = &map->cells[y][x];
+                    c->elevation = (uint8_t)elevation;
+                    c->tile_id = TILE_ROCK_CENTER;
+                    c->flags = TILE_FLAG_PLATEAU;
+                    c->overlay_id = 255;
+                }
+            }
+        }
+    }
+}
+
 // Helper: Add a water pond with properly aligned shoreline corners and edges
 static void Tilemap_AddPond(TileMap* map, int x1, int y1, int w, int h) {
     if (w < 3 || h < 3) return;
@@ -519,12 +583,12 @@ static void Tilemap_AutotilePlateaus(TileMap* map) {
     for (int y = 2; y < MAP_TILES_Y - 2; y++) {
         for (int x = 2; x < MAP_TILES_X - 2; x++) {
             MapCell* c = &map->cells[y][x];
-            if (c->elevation != 1 || (c->flags & TILE_FLAG_RAMP)) continue;
+            if (c->elevation == 0 || (c->flags & TILE_FLAG_RAMP)) continue;
 
-            bool n = (y > 1 && map->cells[y - 1][x].elevation == 1);
-            bool s = (y < MAP_TILES_Y - 2 && map->cells[y + 1][x].elevation == 1);
-            bool w = (x > 1 && map->cells[y][x - 1].elevation == 1);
-            bool e = (x < MAP_TILES_X - 2 && map->cells[y][x + 1].elevation == 1);
+            bool n = (y > 1 && map->cells[y - 1][x].elevation >= c->elevation);
+            bool s = (y < MAP_TILES_Y - 2 && map->cells[y + 1][x].elevation >= c->elevation);
+            bool w = (x > 1 && map->cells[y][x - 1].elevation >= c->elevation);
+            bool e = (x < MAP_TILES_X - 2 && map->cells[y][x + 1].elevation >= c->elevation);
 
             if (!n && !w) {
                 c->tile_id = TILE_ROCK_TL;
@@ -551,11 +615,11 @@ static void Tilemap_AutotilePlateaus(TileMap* map) {
                 c->tile_id = TILE_ROCK_R;
                 c->flags = TILE_FLAG_SOLID;
             } else {
-                // All 4 cardinal neighbors are rock. Check diagonals for inner concave corners!
-                bool nw = (map->cells[y - 1][x - 1].elevation == 1);
-                bool ne = (map->cells[y - 1][x + 1].elevation == 1);
-                bool sw = (map->cells[y + 1][x - 1].elevation == 1);
-                bool se = (map->cells[y + 1][x + 1].elevation == 1);
+                // All 4 cardinal neighbors are rock at or above this tier. Check diagonals for inner concave corners!
+                bool nw = (map->cells[y - 1][x - 1].elevation >= c->elevation);
+                bool ne = (map->cells[y - 1][x + 1].elevation >= c->elevation);
+                bool sw = (map->cells[y + 1][x - 1].elevation >= c->elevation);
+                bool se = (map->cells[y + 1][x + 1].elevation >= c->elevation);
 
                 if (!se) {
                     c->tile_id = TILE_ROCK_INNER_BL;
@@ -990,21 +1054,31 @@ void Tilemap_GenerateRouteMap(TileMap* map, int section_idx, int route_idx) {
     } else {
         // DYNAMIC PROCEDURAL GENERATION: organic winding plateaus, lakes, pathways, grass, and boulders
         switch (map->current_biome) {
-            case BIOME_FOREST: { // Dense winding forest clearings, safari tall grass fields
+            case BIOME_FOREST: { // Forest Canopy Platforms & Sunken Springs
                 int nw_x = 22 + (int)(Route_Rand() % 8), nw_y = 22 + (int)(Route_Rand() % 8);
                 int ne_x = 90 + (int)(Route_Rand() % 8), ne_y = 22 + (int)(Route_Rand() % 8);
                 int sw_x = 22 + (int)(Route_Rand() % 8), sw_y = 90 + (int)(Route_Rand() % 8);
                 int se_x = 90 + (int)(Route_Rand() % 8), se_y = 90 + (int)(Route_Rand() % 8);
 
-                Tilemap_CarveOrganicPlateau(map, nw_x, nw_y, 10, 8, 4);
-                Tilemap_CarveOrganicPlateau(map, ne_x, ne_y, 10, 8, 4);
-                Tilemap_CarveOrganicPlateau(map, sw_x, sw_y, 10, 8, 4);
-                Tilemap_CarveOrganicPlateau(map, se_x, se_y, 10, 8, 4);
+                // Tier 1 broad canopy platforms
+                Tilemap_CarveOrganicPlateau(map, nw_x, nw_y, 11, 9, 4);
+                Tilemap_CarveOrganicPlateau(map, ne_x, ne_y, 11, 9, 4);
+                Tilemap_CarveOrganicPlateau(map, sw_x, sw_y, 11, 9, 4);
+                Tilemap_CarveOrganicPlateau(map, se_x, se_y, 11, 9, 4);
 
+                // Tier 2 high canopy lookouts (jumpable cliffs)
+                Tilemap_AddTieredPlateau(map, nw_x + 2, nw_y + 2, 5, 4, 1, 2, 0, 0);
+                Tilemap_AddTieredPlateau(map, se_x + 2, se_y + 2, 5, 4, 1, 2, 0, 0);
+
+                // Sunken spring clearings
                 Tilemap_CarveOrganicPond(map, 44 + (int)(Route_Rand() % 6), 26 + (int)(Route_Rand() % 6), 7, 6, 3);
                 Tilemap_CarveOrganicPond(map, 76 + (int)(Route_Rand() % 6), 96 + (int)(Route_Rand() % 6), 7, 6, 3);
                 Tilemap_CarveOrganicPond(map, 22 + (int)(Route_Rand() % 6), 60 + (int)(Route_Rand() % 6), 6, 8, 3);
                 Tilemap_CarveOrganicPond(map, 98 + (int)(Route_Rand() % 6), 60 + (int)(Route_Rand() % 6), 6, 8, 3);
+
+                // Stepping log/rock pillars across sunken springs
+                Tilemap_AddSteppingPillars(map, 42, 28, 3, 3, 0, 2, 2);
+                Tilemap_AddSteppingPillars(map, 74, 98, 3, 3, 0, 2, 2);
 
                 // Extensive Safari / Woodland Tall Grass Patches
                 Tilemap_AddTallGrassPatch(map, 38, 38, 4);
@@ -1033,20 +1107,27 @@ void Tilemap_GenerateRouteMap(TileMap* map, int section_idx, int route_idx) {
                 break;
             }
 
-            case BIOME_CAVERN: { // Mountain & Cavern: multi-tiered canyon ridges and crystal springs
+            case BIOME_CAVERN: { // Tiered Crags & Highlands: multi-tiered canyon ridges, crags, and jumping pillars
                 int nw_x = 18 + (int)(Route_Rand() % 6), nw_y = 18 + (int)(Route_Rand() % 6);
                 int ne_x = 92 + (int)(Route_Rand() % 6), ne_y = 18 + (int)(Route_Rand() % 6);
                 int sw_x = 18 + (int)(Route_Rand() % 6), sw_y = 92 + (int)(Route_Rand() % 6);
                 int se_x = 92 + (int)(Route_Rand() % 6), se_y = 92 + (int)(Route_Rand() % 6);
 
-                Tilemap_CarveOrganicPlateau(map, nw_x, nw_y, 12, 10, 5);
-                Tilemap_CarveOrganicPlateau(map, ne_x, ne_y, 12, 10, 5);
-                Tilemap_CarveOrganicPlateau(map, sw_x, sw_y, 12, 10, 5);
-                Tilemap_CarveOrganicPlateau(map, se_x, se_y, 12, 10, 5);
+                // Tier 1 broad crag bases
+                Tilemap_CarveOrganicPlateau(map, nw_x, nw_y, 13, 11, 5);
+                Tilemap_CarveOrganicPlateau(map, ne_x, ne_y, 13, 11, 5);
+                Tilemap_CarveOrganicPlateau(map, sw_x, sw_y, 13, 11, 5);
+                Tilemap_CarveOrganicPlateau(map, se_x, se_y, 13, 11, 5);
 
-                // Canyon flank plateaus
-                Tilemap_CarveOrganicPlateau(map, 38 + (int)(Route_Rand() % 4), 38 + (int)(Route_Rand() % 4), 8, 6, 3);
-                Tilemap_CarveOrganicPlateau(map, 82 + (int)(Route_Rand() % 4), 38 + (int)(Route_Rand() % 4), 8, 6, 3);
+                // Tier 2 high crags & pinnacles (jumpable cliffs)
+                Tilemap_AddTieredPlateau(map, nw_x + 3, nw_y + 3, 5, 4, 1, 2, 0, 0);
+                Tilemap_AddTieredPlateau(map, ne_x + 3, ne_y + 3, 5, 4, 1, 2, 0, 0);
+                Tilemap_AddTieredPlateau(map, sw_x + 3, sw_y + 3, 5, 4, 1, 2, 0, 0);
+                Tilemap_AddTieredPlateau(map, se_x + 3, se_y + 3, 5, 4, 1, 2, 0, 0);
+
+                // Canyon flank stepping pillars
+                Tilemap_AddSteppingPillars(map, 38, 42, 3, 3, 0, 2, 2);
+                Tilemap_AddSteppingPillars(map, 82, 84, 3, 3, 0, 2, 2);
                 Tilemap_CarveOrganicPlateau(map, 38 + (int)(Route_Rand() % 4), 84 + (int)(Route_Rand() % 4), 8, 6, 3);
                 Tilemap_CarveOrganicPlateau(map, 82 + (int)(Route_Rand() % 4), 84 + (int)(Route_Rand() % 4), 8, 6, 3);
 
@@ -1095,6 +1176,14 @@ void Tilemap_GenerateRouteMap(TileMap* map, int section_idx, int route_idx) {
                 Tilemap_CarveOrganicPlateau(map, 34, 104, 8, 6, 3);
                 Tilemap_CarveOrganicPlateau(map, 88, 104, 8, 6, 3);
 
+                // Tier 2 coastal observation bluffs (jumpable cliffs)
+                Tilemap_AddTieredPlateau(map, 36, 21, 4, 4, 1, 2, 0, 0);
+                Tilemap_AddTieredPlateau(map, 90, 105, 4, 4, 1, 2, 0, 0);
+
+                // Stepping stone pillars across coastal waterways (jumping traversal!)
+                Tilemap_AddSteppingPillars(map, 44, 50, 3, 3, 0, 2, 2);
+                Tilemap_AddSteppingPillars(map, 76, 78, 3, 3, 0, 2, 2);
+
                 Tilemap_AddTallGrassPatch(map, 28, 36, 3);
                 Tilemap_AddTallGrassPatch(map, 98, 36, 3);
                 Tilemap_AddTallGrassPatch(map, 28, 90, 3);
@@ -1112,7 +1201,7 @@ void Tilemap_GenerateRouteMap(TileMap* map, int section_idx, int route_idx) {
                 break;
             }
 
-            case BIOME_VOLCANIC: { // Volcanic basalt plateaus & glowing molten lava hazard pools
+            case BIOME_VOLCANIC: { // Volcanic Caldera: basalt plateaus, raised pillars, and lava jumping challenges
                 int nw_x = 20 + (int)(Route_Rand() % 6), nw_y = 20 + (int)(Route_Rand() % 6);
                 int ne_x = 92 + (int)(Route_Rand() % 6), ne_y = 22 + (int)(Route_Rand() % 6);
                 int sw_x = 22 + (int)(Route_Rand() % 6), sw_y = 96 + (int)(Route_Rand() % 6);
@@ -1123,11 +1212,21 @@ void Tilemap_GenerateRouteMap(TileMap* map, int section_idx, int route_idx) {
                 Tilemap_CarveOrganicPlateau(map, sw_x, sw_y, 11, 9, 4);
                 Tilemap_CarveOrganicPlateau(map, se_x, se_y, 11, 9, 4);
 
+                // Tier 2 high volcanic caldera peaks (jumpable cliffs)
+                Tilemap_AddTieredPlateau(map, nw_x + 2, nw_y + 2, 5, 4, 1, 2, 0, 0);
+                Tilemap_AddTieredPlateau(map, se_x + 2, se_y + 2, 5, 4, 1, 2, 0, 0);
+
                 // Glowing molten lava pools dealing ground damage
                 Tilemap_CarveOrganicPond(map, 44 + (int)(Route_Rand() % 6), 26 + (int)(Route_Rand() % 6), 8, 6, 3);
                 Tilemap_CarveOrganicPond(map, 76 + (int)(Route_Rand() % 6), 94 + (int)(Route_Rand() % 6), 8, 6, 3);
                 Tilemap_CarveOrganicPond(map, 20 + (int)(Route_Rand() % 6), 60 + (int)(Route_Rand() % 6), 6, 8, 3);
                 Tilemap_CarveOrganicPond(map, 100 + (int)(Route_Rand() % 6), 60 + (int)(Route_Rand() % 6), 6, 8, 3);
+
+                // Raised basalt stepping pillars across molten lava pools (jumping challenges!)
+                Tilemap_AddSteppingPillars(map, 42, 28, 3, 3, 0, 2, 2);
+                Tilemap_AddSteppingPillars(map, 74, 96, 3, 3, 0, 2, 2);
+                Tilemap_AddSteppingPillars(map, 22, 58, 3, 0, 3, 2, 2);
+                Tilemap_AddSteppingPillars(map, 100, 58, 3, 0, 3, 2, 2);
 
                 // Volcanic destructible boulders
                 Tilemap_AddBoulder(map, 34, 40, 85.0f);
@@ -1544,6 +1643,117 @@ bool Tilemap_CheckCollisionCircle(const TileMap* map, float* pos_x, float* pos_y
                         else if (min_pen == pen_r) *pos_x = box_max_x + col_radius;
                         else if (min_pen == pen_t) *pos_y = box_min_y - col_radius;
                         else *pos_y = box_max_y + col_radius;
+                    }
+                }
+            }
+        }
+    }
+
+    return collided;
+}
+
+static float Tilemap_GetCellTopHeight(const TileMap* map, int tx, int ty) {
+    if (!map || tx < 0 || tx >= MAP_TILES_X || ty < 0 || ty >= MAP_TILES_Y) return 0.0f;
+    const MapCell* cell = &map->cells[ty][tx];
+    if (tx <= 1 || tx >= MAP_TILES_X - 2 || ty <= 1 || ty >= MAP_TILES_Y - 2) return 9999.0f;
+    if (cell->flags & TILE_FLAG_BOULDER) {
+        float base_h = (float)cell->elevation * 38.0f;
+        return base_h + 36.0f;
+    }
+    if (cell->flags & TILE_FLAG_RAMP) {
+        float base_h = (float)(cell->elevation > 0 ? cell->elevation - 1 : 0) * 38.0f;
+        return base_h + 38.0f * 0.5f;
+    }
+    if (cell->elevation > 0 || (cell->flags & TILE_FLAG_PLATEAU)) {
+        return (float)(cell->elevation > 0 ? cell->elevation : 1) * 38.0f;
+    }
+    if (cell->flags & TILE_FLAG_WATER) return -6.0f;
+    return 0.0f;
+}
+
+bool Tilemap_CheckCollisionCircle3D(const TileMap* map, float* pos_x, float* pos_y, float* pos_z, float radius, float step_height, bool can_fly) {
+    if (!map || !pos_x || !pos_y || !pos_z) return false;
+
+    float min_bound = 2.0f * TILE_WORLD_SIZE + radius;
+    float max_bound_x = (MAP_TILES_X - 2.0f) * TILE_WORLD_SIZE - radius;
+    float max_bound_y = (MAP_TILES_Y - 2.0f) * TILE_WORLD_SIZE - radius;
+    bool collided = false;
+
+    if (*pos_x < min_bound)   { *pos_x = min_bound;   collided = true; }
+    if (*pos_x > max_bound_x) { *pos_x = max_bound_x; collided = true; }
+    if (*pos_y < min_bound)   { *pos_y = min_bound;   collided = true; }
+    if (*pos_y > max_bound_y) { *pos_y = max_bound_y; collided = true; }
+
+    if (can_fly) return collided;
+
+    float p_z = *pos_z;
+
+    for (int iter = 0; iter < 2; iter++) {
+        int min_tx = (int)floorf((*pos_x - radius) / TILE_WORLD_SIZE);
+        int max_tx = (int)floorf((*pos_x + radius) / TILE_WORLD_SIZE);
+        int min_ty = (int)floorf((*pos_y - radius) / TILE_WORLD_SIZE);
+        int max_ty = (int)floorf((*pos_y + radius) / TILE_WORLD_SIZE);
+
+        if (min_tx < 0) min_tx = 0;
+        if (max_tx >= MAP_TILES_X) max_tx = MAP_TILES_X - 1;
+        if (min_ty < 0) min_ty = 0;
+        if (max_ty >= MAP_TILES_Y) max_ty = MAP_TILES_Y - 1;
+
+        for (int ty = min_ty; ty <= max_ty; ty++) {
+            for (int tx = min_tx; tx <= max_tx; tx++) {
+                const MapCell* cell = &map->cells[ty][tx];
+                bool is_boundary = (tx <= 1 || tx >= MAP_TILES_X - 2 || ty <= 1 || ty >= MAP_TILES_Y - 2);
+
+                if (cell->flags & TILE_FLAG_RAMP) continue;
+                if ((cell->flags & TILE_FLAG_WATER) && !is_boundary) continue;
+
+                float cell_h = Tilemap_GetCellTopHeight(map, tx, ty);
+
+                // If player's feet are already at or above top surface of this block:
+                if (p_z >= cell_h - 4.0f) continue;
+
+                // Collide with vertical cliff face
+                float box_min_x = tx * TILE_WORLD_SIZE;
+                float box_max_x = (tx + 1) * TILE_WORLD_SIZE;
+                float box_min_y = ty * TILE_WORLD_SIZE;
+                float box_max_y = (ty + 1) * TILE_WORLD_SIZE;
+
+                float cx = fmaxf(box_min_x, fminf(*pos_x, box_max_x));
+                float cy = fmaxf(box_min_y, fminf(*pos_y, box_max_y));
+
+                float dx = *pos_x - cx;
+                float dy = *pos_y - cy;
+                float dist_sq = dx * dx + dy * dy;
+
+                if (dist_sq < radius * radius) {
+                    collided = true;
+
+                    // Step-up / Mantle onto ledge if reachable within step_height
+                    if (cell_h <= p_z + step_height && !is_boundary) {
+                        *pos_z = cell_h;
+                        p_z = cell_h;
+                        float dist = sqrtf(dist_sq);
+                        if (dist > 0.0001f) {
+                            *pos_x -= (dx / dist) * 2.0f;
+                            *pos_y -= (dy / dist) * 2.0f;
+                        }
+                        continue;
+                    }
+                    float dist = sqrtf(dist_sq);
+                    if (dist > 0.0001f) {
+                        float push = radius - dist;
+                        *pos_x += (dx / dist) * push;
+                        *pos_y += (dy / dist) * push;
+                    } else {
+                        float pen_l = *pos_x - box_min_x;
+                        float pen_r = box_max_x - *pos_x;
+                        float pen_t = *pos_y - box_min_y;
+                        float pen_b = box_max_y - *pos_y;
+                        float min_pen = fminf(fminf(pen_l, pen_r), fminf(pen_t, pen_b));
+                        if (min_pen == pen_l) *pos_x = box_min_x - radius;
+                        else if (min_pen == pen_r) *pos_x = box_max_x + radius;
+                        else if (min_pen == pen_t) *pos_y = box_min_y - radius;
+                        else *pos_y = box_max_y + radius;
                     }
                 }
             }

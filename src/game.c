@@ -21,6 +21,7 @@
 #endif
 
 static SpatialGrid g_grid;
+static void Game_UpdateMouseMode(GameState* game);
 
 static const char* GetAssetPath(const char* subpath) {
     static char path[512];
@@ -469,6 +470,7 @@ void Game_ApplyLevelUpChoice(GameState* game, int card_index) {
 
     game->app_state = APP_STATE_PLAYING;
     game->paused = false;
+    Game_UpdateMouseMode(game);
 }
 
 void Game_ThrowPokeball(GameState* game) {
@@ -485,10 +487,15 @@ void Game_ThrowPokeball(GameState* game) {
         return;
     }
 
-    // Determine throw direction towards mouse cursor or aim direction
+    // Determine throw direction towards crosshair aim in 3D or mouse cursor
     Vec2 aim = p->aim_dir;
     float throw_dist = 220.0f;
-    if (game->mouse_active) {
+    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+        aim = (Vec2){ p->aim_dir_3d.x, p->aim_dir_3d.z };
+        float alen = sqrtf(aim.x * aim.x + aim.y * aim.y);
+        if (alen > 0.001f) { aim.x /= alen; aim.y /= alen; }
+        throw_dist = 260.0f;
+    } else if (game->mouse_active) {
         float mdx = game->mouse_pos.x - p->pos.x;
         float mdy = game->mouse_pos.y - p->pos.y;
         float mdist = sqrtf(mdx * mdx + mdy * mdy);
@@ -505,7 +512,16 @@ void Game_ThrowPokeball(GameState* game) {
             proj->active = true;
             proj->type = PROJ_POKEBALL;
             proj->pos = p->pos;
-            proj->vel = (Vec2){ aim.x * 420.0f, aim.y * 420.0f };
+            if (game->camera3d.mode != VIEW_2D_ORTHO) {
+                float h_speed = 420.0f * sqrtf(fmaxf(0.1f, 1.0f - p->aim_dir_3d.y * p->aim_dir_3d.y));
+                proj->vel = (Vec2){ aim.x * h_speed, aim.y * h_speed };
+                proj->y = p->y + 16.0f;
+                proj->vy = 160.0f + p->aim_dir_3d.y * 220.0f;
+            } else {
+                proj->vel = (Vec2){ aim.x * 420.0f, aim.y * 420.0f };
+                proj->y = 16.0f;
+                proj->vy = 160.0f;
+            }
             proj->radius = 9.0f;
             proj->damage = 0.0f;
             proj->lifetime = 0.0f;
@@ -762,6 +778,20 @@ void Party_Draw(GameState* game) {
     }
 }
 
+static void Game_UpdateMouseMode(GameState* game) {
+    if (!game) return;
+    bool want_relative = (game->app_state == APP_STATE_PLAYING &&
+                          game->camera3d.mode != VIEW_2D_ORTHO &&
+                          !game->dev_menu.open &&
+                          !game->paused);
+    if (game->relative_mouse_mode != want_relative) {
+        game->relative_mouse_mode = want_relative;
+        if (game->renderer) {
+            SDL_SetRelativeMouseMode(want_relative ? SDL_TRUE : SDL_FALSE);
+        }
+    }
+}
+
 void Game_SelectStarter(GameState* game, StarterID starter) {
     Player* p = &game->player;
     p->starter = starter;
@@ -883,12 +913,21 @@ void Game_SelectStarter(GameState* game, StarterID starter) {
     // Initialize Route 1 (Section 0, Route 0)
     KantoRoutes_Init(game);
 
-    // Snap 3D camera to player position
+    // Snap 3D camera to player position & initialize 3D vertical physics
     float sp_height = Render3D_GetTerrainHeight(&game->tilemap, p->pos.x, p->pos.y);
+    p->y = sp_height;
+    p->vy = 0.0f;
+    p->is_grounded = true;
+    p->jump_power = 380.0f;
+    p->gravity = 920.0f;
+    p->coyote_timer = 0.0f;
+    game->hitmarker_timer = 0.0f;
+    game->crosshair_target_enemy = -1;
     Camera3D_Snap(&game->camera3d, (Vec3){ p->pos.x, sp_height, p->pos.y });
 
     game->app_state = APP_STATE_PLAYING;
     game->paused = false;
+    Game_UpdateMouseMode(game);
     if (!g_headless_sim) printf("[Game] Selected starter: %d. Route 1 initialized!\n", starter);
 }
 
@@ -950,9 +989,19 @@ void Game_Init(GameState* game, SDL_Window* window, SDL_Renderer* renderer) {
     
     game->mouse_active = false;
     game->mouse_pos = (Vec2){ 0.0f, 0.0f };
+    game->relative_mouse_mode = false;
+    game->hitmarker_timer = 0.0f;
+    game->crosshair_target_enemy = -1;
 
     // Initialize 3D Camera & Rendering Subsystem
     Render3D_Init(game);
+    float p_height = Render3D_GetTerrainHeight(&game->tilemap, game->player.pos.x, game->player.pos.y);
+    game->player.y = p_height;
+    game->player.vy = 0.0f;
+    game->player.is_grounded = true;
+    game->player.jump_power = 380.0f;
+    game->player.gravity = 920.0f;
+    game->player.coyote_timer = 0.0f;
 
     if (!g_headless_sim) printf("[Game] Initialized Kanto Roguelike Engine (3D Third-Person Architecture Active).\n");
 }
@@ -972,10 +1021,18 @@ void Game_HandleEvent(GameState* game, const SDL_Event* event) {
         if (event->type == SDL_MOUSEMOTION) {
             game->mouse_active = true;
             if (game->camera3d.mode != VIEW_2D_ORTHO) {
-                Vec3 ground_pt;
-                if (Camera3D_ScreenToGround(&game->camera3d, (float)event->motion.x, (float)event->motion.y, p_height, &ground_pt)) {
-                    game->mouse_pos.x = ground_pt.x;
-                    game->mouse_pos.y = ground_pt.z;
+                if (game->relative_mouse_mode) {
+                    float sens = 0.0035f;
+                    game->camera3d.yaw += (float)event->motion.xrel * sens;
+                    game->camera3d.pitch -= (float)event->motion.yrel * sens;
+                    if (game->camera3d.pitch < -0.40f) game->camera3d.pitch = -0.40f;
+                    if (game->camera3d.pitch > 1.38f)  game->camera3d.pitch = 1.38f;
+                } else {
+                    Vec3 ground_pt;
+                    if (Camera3D_ScreenToGround(&game->camera3d, (float)event->motion.x, (float)event->motion.y, p_height, &ground_pt)) {
+                        game->mouse_pos.x = ground_pt.x;
+                        game->mouse_pos.y = ground_pt.z;
+                    }
                 }
             } else {
                 game->mouse_pos = (Vec2){ (float)event->motion.x + game->camera.x,
@@ -985,12 +1042,27 @@ void Game_HandleEvent(GameState* game, const SDL_Event* event) {
             if (event->button.button == SDL_BUTTON_MIDDLE) {
                 // Middle click snaps camera directly behind player facing direction
                 Camera3D_ResetBehindPlayer(&game->camera3d, Sprite_DirectionToAngle(game->player.anim.direction));
-            } else if (game->camera3d.mode == VIEW_2D_ORTHO && event->button.button == SDL_BUTTON_RIGHT) {
+            } else if (event->button.button == SDL_BUTTON_RIGHT) {
                 Game_ThrowPokeball(game);
+            } else if (event->button.button == SDL_BUTTON_LEFT) {
+                if (game->camera3d.mode != VIEW_2D_ORTHO) {
+                    if (!game->relative_mouse_mode) {
+                        Game_UpdateMouseMode(game);
+                    } else if (game->player.weapon_count > 0 && game->player.weapons[0].cooldown_timer <= 0.0f) {
+                        Weapons_FireSlot(game, &game->player.weapons[0]);
+                        game->player.weapons[0].cooldown_timer = game->player.weapons[0].cooldown;
+                    }
+                }
             }
         } else if (event->type == SDL_KEYDOWN) {
             if (event->key.keysym.sym == SDLK_e || event->key.keysym.sym == SDLK_c) {
                 Game_ThrowPokeball(game);
+            } else if (event->key.keysym.sym == SDLK_SPACE && game->camera3d.mode != VIEW_2D_ORTHO) {
+                if (game->player.is_grounded || game->player.coyote_timer > 0.0f) {
+                    game->player.vy = game->player.jump_power;
+                    game->player.is_grounded = false;
+                    game->player.coyote_timer = 0.0f;
+                }
             }
         }
     } else if (game->app_state == APP_STATE_STARTER_SELECT) {
@@ -1038,6 +1110,7 @@ void Game_HandleEvent(GameState* game, const SDL_Event* event) {
             if (event->key.keysym.sym == SDLK_r || event->key.keysym.sym == SDLK_SPACE) {
                 game->app_state = APP_STATE_STARTER_SELECT;
                 game->selected_starter_hover = STARTER_NONE;
+                Game_UpdateMouseMode(game);
             }
         }
     }
@@ -1076,8 +1149,26 @@ void Game_HandleInput(GameState* game, const Uint8* keystate, float dt) {
     if (is_moving) {
         vx = (vx / len) * p->speed;
         vy = (vy / len) * p->speed;
-        if (p->state == PLAYER_STATE_NORMAL) {
+        if (p->state == PLAYER_STATE_NORMAL && game->camera3d.mode == VIEW_2D_ORTHO) {
             p->anim.direction = Sprite_VecToDirection(vx, vy, p->anim.direction);
+        }
+    }
+
+    // 3D Spacebar Platforming Jump
+    if (keystate[SDL_SCANCODE_SPACE] && game->camera3d.mode != VIEW_2D_ORTHO) {
+        if (p->is_grounded || p->coyote_timer > 0.0f) {
+            p->vy = p->jump_power;
+            p->is_grounded = false;
+            p->coyote_timer = 0.0f;
+        }
+    }
+
+    // Primary Attack: Hold Left-Click in 3D relative mouse mode
+    if (game->camera3d.mode != VIEW_2D_ORTHO && game->relative_mouse_mode) {
+        Uint32 mstate = SDL_GetMouseState(NULL, NULL);
+        if ((mstate & SDL_BUTTON(SDL_BUTTON_LEFT)) && p->weapon_count > 0 && p->weapons[0].cooldown_timer <= 0.0f) {
+            Weapons_FireSlot(game, &p->weapons[0]);
+            p->weapons[0].cooldown_timer = p->weapons[0].cooldown;
         }
     }
     
@@ -1193,12 +1284,70 @@ void Game_Update(GameState* game, float dt) {
     // -------------------------------------------------------------
     uint64_t t_p_start = Profiler_GetTimestamp();
     Player* p = &game->player;
+
+    // Update relative mouse capture & hitmarker timer
+    Game_UpdateMouseMode(game);
+    if (game->hitmarker_timer > 0.0f) {
+        game->hitmarker_timer -= dt;
+        if (game->hitmarker_timer < 0.0f) game->hitmarker_timer = 0.0f;
+    }
+
+    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+        // Crosshair aim raycast against terrain and enemy bounding spheres
+        int enemy_hit = -1;
+        Camera3D_RaycastCrosshair(&game->camera3d, &game->tilemap, game, &game->crosshair_aim_world, &enemy_hit);
+        game->crosshair_target_enemy = enemy_hit;
+        p->aim_target_3d = game->crosshair_aim_world;
+        Vec3 p_origin = { p->pos.x, p->y + 16.0f, p->pos.y };
+        float adx = game->crosshair_aim_world.x - p_origin.x;
+        float ady = game->crosshair_aim_world.y - p_origin.y;
+        float adz = game->crosshair_aim_world.z - p_origin.z;
+        float adlen = sqrtf(adx * adx + ady * ady + adz * adz);
+        if (adlen > 0.001f) {
+            p->aim_dir_3d = (Vec3){ adx / adlen, ady / adlen, adz / adlen };
+        } else {
+            p->aim_dir_3d = game->camera3d.forward;
+        }
+        p->aim_dir = (Vec2){ p->aim_dir_3d.x, p->aim_dir_3d.z };
+        float hlen = sqrtf(p->aim_dir.x * p->aim_dir.x + p->aim_dir.y * p->aim_dir.y);
+        if (hlen > 0.001f) { p->aim_dir.x /= hlen; p->aim_dir.y /= hlen; }
+        if (p->state == PLAYER_STATE_NORMAL) {
+            p->anim.direction = Sprite_VecToDirection(p->aim_dir.x, p->aim_dir.y, p->anim.direction);
+        }
+    }
     
     p->pos.x += p->vel.x * dt;
     p->pos.y += p->vel.y * dt;
     
     // Resolve collision against solid rock cliffs and water bodies
-    Tilemap_CheckCollisionCircle(&game->tilemap, &p->pos.x, &p->pos.y, p->radius, false);
+    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+        Tilemap_CheckCollisionCircle3D(&game->tilemap, &p->pos.x, &p->pos.y, &p->y, p->radius, 20.0f, false);
+        
+        // 3D Vertical Physics & Platform Traversal
+        float ground_h = Render3D_GetTerrainHeight(&game->tilemap, p->pos.x, p->pos.y);
+        if (!p->is_grounded || p->y > ground_h) {
+            p->vy -= p->gravity * dt;
+            p->y += p->vy * dt;
+            if (p->y <= ground_h) {
+                p->y = ground_h;
+                p->vy = 0.0f;
+                p->is_grounded = true;
+                p->coyote_timer = 0.12f;
+            } else {
+                p->is_grounded = false;
+                if (p->coyote_timer > 0.0f) p->coyote_timer -= dt;
+            }
+        } else {
+            p->y = ground_h;
+            p->vy = 0.0f;
+            p->is_grounded = true;
+            p->coyote_timer = 0.12f;
+        }
+    } else {
+        Tilemap_CheckCollisionCircle(&game->tilemap, &p->pos.x, &p->pos.y, p->radius, false);
+        p->y = 0.0f;
+        p->is_grounded = true;
+    }
     
     if (p->pos.x < p->radius) p->pos.x = p->radius;
     if (p->pos.x > WORLD_SIZE_X - p->radius) p->pos.x = WORLD_SIZE_X - p->radius;
@@ -1283,7 +1432,7 @@ void Game_Update(GameState* game, float dt) {
                 }
             }
         }
-        if (touching_lava) {
+        if (touching_lava && (game->camera3d.mode == VIEW_2D_ORTHO || p->y <= 6.0f)) {
             float lava_dmg = 24.0f * dt;
             p->hp -= lava_dmg;
             p->damage_flash_timer = 0.08f;
@@ -1860,6 +2009,13 @@ void Game_Update(GameState* game, float dt) {
             float hit_dist = proj->radius + e->radius;
             
             if (dx * dx + dy * dy <= hit_dist * hit_dist) {
+                // In 3D, check vertical cylinder overlap
+                if (game->camera3d.mode != VIEW_2D_ORTHO && proj->type != PROJ_LIGHTNING_BOLT) {
+                    float eh = Render3D_GetTerrainHeight(&game->tilemap, e->pos.x, e->pos.y);
+                    if (game->enemy_types[e->type].move_pattern == ENEMY_MOVE_FLANK_ORBIT) eh += 20.0f;
+                    if (proj->y < eh - 12.0f || proj->y > eh + 48.0f) continue;
+                }
+
                 if (proj->type == PROJ_ORBITER) {
                     e->orbiter_hit_cooldown = 0.35f;
                 } else {
@@ -1939,6 +2095,9 @@ void Game_Update(GameState* game, float dt) {
                 else if (proj->type == PROJ_SCALD_BUBBLE) proj_src = "SCALD_BUBBLE";
 
                 float final_dmg = Game_ApplyEnemyDamage(game, e_idx, proj->damage, proj_src);
+                if (final_dmg > 0.0f) {
+                    game->hitmarker_timer = 0.12f;
+                }
                 if (proj->type == PROJ_LIGHTNING_BOLT) {
                     proj->damage = 0.0f; // Visual effect remains alive, but damage is dealt once
                 }
@@ -2136,6 +2295,12 @@ void Game_Update(GameState* game, float dt) {
                 bool on_ramp = ((game->tilemap.cells[p_ty][p_tx].flags & TILE_FLAG_RAMP) != 0) ||
                                (e_tx >= 0 && e_tx < MAP_TILES_X && e_ty >= 0 && e_ty < MAP_TILES_Y && (game->tilemap.cells[e_ty][e_tx].flags & TILE_FLAG_RAMP) != 0);
                 if (!on_ramp && e_elev != p_elev) continue; // Ground entities cannot touch across elevation cliffs unless traversing a ramp
+            }
+
+            if (game->camera3d.mode != VIEW_2D_ORTHO) {
+                float eh = Render3D_GetTerrainHeight(&game->tilemap, e->pos.x, e->pos.y);
+                if (e_can_fly) eh += 20.0f;
+                if (fabsf(p->y - eh) > 28.0f) continue;
             }
             
             float dx = e->pos.x - p->pos.x;

@@ -14,6 +14,7 @@
 #include "src/telemetry.h"
 #include "src/camera3d.h"
 #include "src/render3d.h"
+#include "src/weapons.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1593,6 +1594,192 @@ void test_3d_billboard_facing_and_elevation() {
     printf("  -> 3D billboard relative direction mapping across 360 camera orbit, boulder elevation, and continuous ramp terrain verified!\n");
 }
 
+void test_3d_platforming_crosshair_and_tiered_terrain() {
+    printf("[TEST] Running test_3d_platforming_crosshair_and_tiered_terrain...\n");
+
+    // 1. Multi-tiered plateau & stepping pillar heightfields
+    TileMap map;
+    memset(&map, 0, sizeof(TileMap));
+
+    // Base ground: elevation 0 -> height 0.0f
+    assert(Render3D_GetTerrainHeight(&map, 50.0f, 50.0f) == 0.0f);
+
+    // Tier 1 plateau: elevation 1 -> height 38.0f
+    map.cells[10][10].elevation = 1;
+    map.cells[10][10].flags = TILE_FLAG_PLATEAU;
+    assert(Render3D_GetTerrainHeight(&map, 10 * 64.0f + 32.0f, 10 * 64.0f + 32.0f) == 38.0f);
+
+    // Tier 2 plateau: elevation 2 -> height 76.0f
+    Tilemap_AddTieredPlateau(&map, 15, 15, 6, 6, 1, 2, 0, 0);
+    assert(map.cells[17][17].elevation == 2);
+    assert(Render3D_GetTerrainHeight(&map, 17 * 64.0f + 32.0f, 17 * 64.0f + 32.0f) == 76.0f);
+
+    // Stepping stone pillars across hazards: elevation 2 -> height 76.0f
+    Tilemap_AddSteppingPillars(&map, 25, 25, 3, 3, 0, 2, 2);
+    assert(map.cells[25][25].elevation == 2);
+    assert(Render3D_GetTerrainHeight(&map, 25 * 64.0f + 32.0f, 25 * 64.0f + 32.0f) == 76.0f);
+    assert(map.cells[25][28].elevation == 2);
+    assert(Render3D_GetTerrainHeight(&map, 28 * 64.0f + 32.0f, 25 * 64.0f + 32.0f) == 76.0f);
+
+    // 2. 3D Collision resolution and step-up ledge mantling
+    for (int y = 5; y <= 8; y++) {
+        for (int x = 5; x <= 8; x++) {
+            map.cells[y][x].elevation = 1;
+            map.cells[y][x].flags = TILE_FLAG_PLATEAU;
+        }
+    }
+    map.cells[5][5].flags = TILE_FLAG_SOLID;
+    map.cells[6][5].flags = TILE_FLAG_SOLID;
+
+    // A. Player on ground (pos_z = 0.0f) running into cliff wall: blocked!
+    float px = 4.9f * 64.0f;
+    float py = 6.5f * 64.0f;
+    float pz = 0.0f;
+    float radius = 16.0f;
+    bool col1 = Tilemap_CheckCollisionCircle3D(&map, &px, &py, &pz, radius, 20.0f, false);
+    assert(col1 == true);
+    assert(px < 5.0f * 64.0f);
+    assert(pz == 0.0f);
+
+    // B. Player jumping (pos_z = 24.0f) within step_height (20.0f) of ledge (38.0f): mantles up!
+    px = 4.9f * 64.0f;
+    py = 6.5f * 64.0f;
+    pz = 24.0f;
+    Tilemap_CheckCollisionCircle3D(&map, &px, &py, &pz, radius, 20.0f, false);
+    assert(pz == 38.0f);
+
+    // C. Player standing on plateau (pos_z = 38.0f): moves freely without horizontal block
+    px = 6.5f * 64.0f;
+    py = 6.5f * 64.0f;
+    pz = 38.0f;
+    bool col3 = Tilemap_CheckCollisionCircle3D(&map, &px, &py, &pz, radius, 20.0f, false);
+    assert(col3 == false);
+
+    // 3. 3D Jump and Ballistic Trajectory Integration
+    Player player;
+    memset(&player, 0, sizeof(Player));
+    player.pos.x = 200.0f;
+    player.pos.y = 200.0f;
+    player.y = 0.0f;
+    player.vy = 380.0f;
+    player.jump_power = 380.0f;
+    player.gravity = 920.0f;
+    player.is_grounded = false;
+
+    // Simulate 0.5s jump in 10ms timesteps
+    float max_y = 0.0f;
+    for (int step = 0; step < 50; step++) {
+        float dt = 0.01f;
+        player.vy -= player.gravity * dt;
+        player.y += player.vy * dt;
+        if (player.y > max_y) max_y = player.y;
+    }
+    assert(max_y > 75.0f && max_y < 82.0f);
+
+    // Player landing detection
+    player.y = -5.0f;
+    float ground_h = Render3D_GetTerrainHeight(&map, player.pos.x, player.pos.y);
+    if (player.y <= ground_h) {
+        player.y = ground_h;
+        player.vy = 0.0f;
+        player.is_grounded = true;
+    }
+    assert(player.y == 0.0f);
+    assert(player.vy == 0.0f);
+    assert(player.is_grounded == true);
+
+    // 4. Camera3D Crosshair Raycast (Enemy bounding sphere & terrain)
+    Camera3D cam;
+    Camera3D_Init(&cam, VIEW_3D_THIRD_PERSON);
+    Vec3 p_pos = { 200.0f, 0.0f, 200.0f };
+    Camera3D_Snap(&cam, p_pos);
+
+    GameState test_game;
+    memset(&test_game, 0, sizeof(GameState));
+    test_game.active_enemy_count = 1;
+    test_game.active_enemy_indices[0] = 0;
+    test_game.enemies[0].active = true;
+    test_game.enemies[0].pos.x = p_pos.x;
+    test_game.enemies[0].pos.y = p_pos.z;
+    test_game.enemy_types[0].radius = 16.0f;
+
+    Vec3 hit_world;
+    int hit_enemy = -1;
+    bool ray_ok = Camera3D_RaycastCrosshair(&cam, &map, &test_game, &hit_world, &hit_enemy);
+    assert(ray_ok == true);
+    assert(hit_enemy == 0);
+    assert(fabsf(hit_world.x - test_game.enemies[0].pos.x) < 25.0f);
+
+    // Test terrain fallback when no enemy in line of sight
+    test_game.active_enemy_count = 0;
+    hit_enemy = -1;
+    ray_ok = Camera3D_RaycastCrosshair(&cam, &map, &test_game, &hit_world, &hit_enemy);
+    assert(ray_ok == true);
+    assert(hit_enemy == -1);
+
+    // Verify Tier 2 plateau ramp connects tier 1 to tier 2 properly
+    TileMap ramp_map;
+    memset(&ramp_map, 0, sizeof(TileMap));
+    Tilemap_AddTieredPlateau(&ramp_map, 30, 30, 8, 8, 1, 2, 1, 2);
+    assert(ramp_map.cells[37][33].flags & TILE_FLAG_RAMP);
+    assert(ramp_map.cells[37][33].elevation == 2);
+    assert(ramp_map.cells[37][33].tile_id == TILE_ROCK_RAMP_S);
+
+    // Non-contact mantling isolation: distant airborne player must NOT false-mantle
+    float distant_px = 3.5f * 64.0f;
+    float distant_py = 6.5f * 64.0f;
+    float distant_pz = 24.0f;
+    bool col_dist = Tilemap_CheckCollisionCircle3D(&map, &distant_px, &distant_py, &distant_pz, radius, 20.0f, false);
+    assert(col_dist == false);
+    assert(distant_pz == 24.0f); // Did NOT false-mantle when not contacting obstacle!
+
+    // 5. 3D Crosshair Aim Retention in Weapons_Update
+    test_game.camera3d.mode = VIEW_3D_THIRD_PERSON;
+    test_game.player.aim_dir = (Vec2){ 0.707f, 0.707f };
+    test_game.player.aim_dir_3d = (Vec3){ 0.707f, 0.0f, 0.707f };
+    test_game.mouse_active = true;
+    test_game.mouse_pos = (Vec2){ 0.0f, 0.0f }; // In relative mode, mouse_pos is at 0,0
+    Weapons_Update(&test_game, 0.016f);
+    assert(fabsf(test_game.player.aim_dir.x - 0.707f) < 0.01f);
+    assert(fabsf(test_game.player.aim_dir.y - 0.707f) < 0.01f);
+
+    // 6. Projectile Horizontal Motion (Pokéballs & Scald Bubbles)
+    test_game.projectiles[0].active = true;
+    test_game.projectiles[0].type = PROJ_POKEBALL;
+    test_game.projectiles[0].pos = (Vec2){ 100.0f, 100.0f };
+    test_game.projectiles[0].vel = (Vec2){ 200.0f, 0.0f };
+    test_game.projectiles[0].y = 40.0f;
+    test_game.projectiles[0].vy = 0.0f;
+    test_game.projectiles[0].pierce_left = 1;
+    test_game.projectiles[0].max_lifetime = 2.0f;
+    test_game.projectiles[0].lifetime = 0.0f;
+    Weapons_Update(&test_game, 0.1f);
+    assert(test_game.projectiles[0].pos.x > 115.0f);
+
+    // 7. 3D Jump Evasion: Jumping over enemy projectiles avoids damage
+    test_game.player.hp = 100.0f;
+    test_game.player.invuln_timer = 0.0f;
+    test_game.player.god_mode = false;
+    test_game.player.pos = (Vec2){ 300.0f, 300.0f };
+    test_game.player.radius = 16.0f;
+    test_game.player.y = 65.0f; // High in air jumping!
+
+    test_game.projectiles[1].active = true;
+    test_game.projectiles[1].is_enemy = true;
+    test_game.projectiles[1].type = PROJ_ENEMY_BULLET;
+    test_game.projectiles[1].pos = (Vec2){ 300.0f, 300.0f };
+    test_game.projectiles[1].y = 16.0f; // Ground bullet
+    test_game.projectiles[1].damage = 25.0f;
+    test_game.projectiles[1].radius = 10.0f;
+    test_game.projectiles[1].max_lifetime = 1.0f;
+    test_game.projectiles[1].lifetime = 0.0f;
+
+    Weapons_Update(&test_game, 0.016f);
+    assert(test_game.player.hp == 100.0f); // Dodged bullet vertically via jump!
+
+    printf("  -> 3D platforming, jump trajectory, step-up mantling, multi-tier heightfields, crosshair raycast, and projectile traversal verified!\n");
+}
+
 int main() {
     g_headless_sim = true;
     printf("=========================================\n");
@@ -1619,6 +1806,7 @@ int main() {
     test_volcanic_lava_and_tall_grass_interactions();
     test_3d_camera_math_and_projection();
     test_3d_billboard_facing_and_elevation();
+    test_3d_platforming_crosshair_and_tiered_terrain();
     printf("\n>>> ALL TESTS PASSED SUCCESSFULLY! <<<\n");
     return 0;
 }

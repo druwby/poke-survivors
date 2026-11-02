@@ -2,6 +2,7 @@
 #include "game.h"
 #include "sprite.h"
 #include "font.h"
+#include "render3d.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -511,6 +512,8 @@ static Projectile* AllocProjectile(GameState* game) {
             game->projectiles[i].is_enemy = false;
             game->projectiles[i].color = (SDL_Color){ 255, 255, 255, 255 };
             game->projectiles[i].hit_uids_count = 0;
+            game->projectiles[i].y = (game->camera3d.mode != VIEW_2D_ORTHO) ? (game->player.y + 16.0f) : 16.0f;
+            game->projectiles[i].vy = 0.0f;
             return &game->projectiles[i];
         }
     }
@@ -531,6 +534,20 @@ void Weapons_SpawnEnemyProjectile(GameState* game, Vec2 pos, Vec2 vel, float rad
     p->is_enemy = true;
     p->color = color;
     p->knockback = 50.0f;
+
+    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+        float eh = Render3D_GetTerrainHeight(&game->tilemap, pos.x, pos.y) + 16.0f;
+        p->y = eh;
+        float dy = (game->player.y + 16.0f) - eh;
+        float dx = game->player.pos.x - pos.x;
+        float dz = game->player.pos.y - pos.y;
+        float h_dist = sqrtf(dx * dx + dz * dz);
+        float h_spd = sqrtf(vel.x * vel.x + vel.y * vel.y);
+        p->vy = (h_dist > 1.0f) ? (dy / h_dist) * h_spd : 0.0f;
+    } else {
+        p->y = 16.0f;
+        p->vy = 0.0f;
+    }
 }
 
 void Weapons_SpawnGroundHazard(GameState* game, HazardType type, Vec2 pos, float radius, float duration, float damage, bool is_enemy, SDL_Color color) {
@@ -660,8 +677,18 @@ void Weapons_FireFlamethrower(GameState* game, ActiveWeaponSlot* slot) {
         proj->pos.x = p->pos.x + flame_dir.x * 14.0f;
         proj->pos.y = p->pos.y + flame_dir.y * 14.0f;
         float spd = slot->proj_speed * (0.85f + (float)(rand() % 30) * 0.01f);
-        proj->vel.x = cosf(fire_a) * spd;
-        proj->vel.y = sinf(fire_a) * spd;
+        if (game->camera3d.mode != VIEW_2D_ORTHO) {
+            float h_speed = spd * sqrtf(fmaxf(0.01f, 1.0f - p->aim_dir_3d.y * p->aim_dir_3d.y));
+            proj->vel.x = cosf(fire_a) * h_speed;
+            proj->vel.y = sinf(fire_a) * h_speed;
+            proj->vy = p->aim_dir_3d.y * spd;
+            proj->y = p->y + 16.0f;
+        } else {
+            proj->vel.x = cosf(fire_a) * spd;
+            proj->vel.y = sinf(fire_a) * spd;
+            proj->vy = 0.0f;
+            proj->y = 16.0f;
+        }
         proj->radius = slot->proj_radius;
         proj->damage = slot->damage * p->damage_mult;
         proj->pierce_left = slot->pierce;
@@ -690,8 +717,18 @@ void Weapons_FireBubbleBeam(GameState* game, ActiveWeaponSlot* slot) {
         proj->pos = p->pos;
         proj->pos.x += -dir.y * ((float)b - (float)(bubble_count - 1) * 0.5f) * 10.0f;
         proj->pos.y +=  dir.x * ((float)b - (float)(bubble_count - 1) * 0.5f) * 10.0f;
-        proj->vel.x = cosf(bubble_a) * slot->proj_speed;
-        proj->vel.y = sinf(bubble_a) * slot->proj_speed;
+        if (game->camera3d.mode != VIEW_2D_ORTHO) {
+            float h_speed = slot->proj_speed * sqrtf(fmaxf(0.01f, 1.0f - p->aim_dir_3d.y * p->aim_dir_3d.y));
+            proj->vel.x = cosf(bubble_a) * h_speed;
+            proj->vel.y = sinf(bubble_a) * h_speed;
+            proj->vy = p->aim_dir_3d.y * slot->proj_speed;
+            proj->y = p->y + 16.0f;
+        } else {
+            proj->vel.x = cosf(bubble_a) * slot->proj_speed;
+            proj->vel.y = sinf(bubble_a) * slot->proj_speed;
+            proj->vy = 0.0f;
+            proj->y = 16.0f;
+        }
         proj->radius = slot->proj_radius;
         proj->damage = slot->damage * p->damage_mult;
         proj->pierce_left = slot->pierce;
@@ -717,8 +754,18 @@ void Weapons_FireRazorLeaf(GameState* game, ActiveWeaponSlot* slot) {
         proj->type = PROJ_RAZOR_LEAF;
         proj->color = (SDL_Color){ 90, 240, 80, 255 };
         proj->pos = p->pos;
-        proj->vel.x = cosf(leaf_a) * slot->proj_speed;
-        proj->vel.y = sinf(leaf_a) * slot->proj_speed;
+        if (game->camera3d.mode != VIEW_2D_ORTHO) {
+            float h_speed = slot->proj_speed * sqrtf(fmaxf(0.01f, 1.0f - p->aim_dir_3d.y * p->aim_dir_3d.y));
+            proj->vel.x = cosf(leaf_a) * h_speed;
+            proj->vel.y = sinf(leaf_a) * h_speed;
+            proj->vy = p->aim_dir_3d.y * slot->proj_speed;
+            proj->y = p->y + 16.0f;
+        } else {
+            proj->vel.x = cosf(leaf_a) * slot->proj_speed;
+            proj->vel.y = sinf(leaf_a) * slot->proj_speed;
+            proj->vy = 0.0f;
+            proj->y = 16.0f;
+        }
         proj->radius = slot->proj_radius;
         proj->damage = slot->damage * p->damage_mult;
         proj->pierce_left = slot->pierce;
@@ -744,8 +791,18 @@ void Weapons_FireSwift(GameState* game, ActiveWeaponSlot* slot) {
         proj->type = PROJ_SWIFT_STAR;
         proj->color = (SDL_Color){ 255, 230, 60, 255 };
         proj->pos = p->pos;
-        proj->vel.x = cosf(star_a) * slot->proj_speed;
-        proj->vel.y = sinf(star_a) * slot->proj_speed;
+        if (game->camera3d.mode != VIEW_2D_ORTHO) {
+            float h_speed = slot->proj_speed * sqrtf(fmaxf(0.01f, 1.0f - p->aim_dir_3d.y * p->aim_dir_3d.y));
+            proj->vel.x = cosf(star_a) * h_speed;
+            proj->vel.y = sinf(star_a) * h_speed;
+            proj->vy = p->aim_dir_3d.y * slot->proj_speed;
+            proj->y = p->y + 16.0f;
+        } else {
+            proj->vel.x = cosf(star_a) * slot->proj_speed;
+            proj->vel.y = sinf(star_a) * slot->proj_speed;
+            proj->vy = 0.0f;
+            proj->y = 16.0f;
+        }
         proj->radius = slot->proj_radius;
         proj->damage = slot->damage * p->damage_mult;
         proj->pierce_left = slot->pierce;
@@ -981,8 +1038,18 @@ void Weapons_FireRockSlide(GameState* game, ActiveWeaponSlot* slot) {
         Projectile* proj = AllocProjectile(game);
         if (!proj) break;
         proj->type = PROJ_ROCK_SLIDE;
-        proj->pos = (Vec2){ drop_target.x, drop_target.y - 180.0f }; // Falls from sky
-        proj->vel = (Vec2){ 0.0f, slot->proj_speed };
+        if (game->camera3d.mode != VIEW_2D_ORTHO) {
+            proj->pos = drop_target;
+            float target_gh = Render3D_GetTerrainHeight(&game->tilemap, drop_target.x, drop_target.y);
+            proj->y = target_gh + 180.0f;
+            proj->vy = -slot->proj_speed;
+            proj->vel = (Vec2){ 0.0f, 0.0f };
+        } else {
+            proj->pos = (Vec2){ drop_target.x, drop_target.y - 180.0f }; // Falls from sky
+            proj->vel = (Vec2){ 0.0f, slot->proj_speed };
+            proj->y = 16.0f;
+            proj->vy = 0.0f;
+        }
         proj->radius = slot->proj_radius;
         proj->damage = slot->damage * p->damage_mult;
         proj->pierce_left = 2;
@@ -1140,7 +1207,9 @@ void Weapons_Update(GameState* game, float dt) {
     Player* player = &game->player;
 
     // 0. Update aim direction for player
-    if (game->mouse_active) {
+    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+        // In 3D mode, player->aim_dir and player->aim_dir_3d are already computed from the 3D crosshair raycast in Game_Update
+    } else if (game->mouse_active) {
         float mdx = game->mouse_pos.x - player->pos.x;
         float mdy = game->mouse_pos.y - player->pos.y;
         float mlen = sqrtf(mdx * mdx + mdy * mdy);
@@ -1313,6 +1382,29 @@ void Weapons_Update(GameState* game, float dt) {
             p->active = false;
             continue;
         }
+
+        // 3D vertical movement & ballistic gravity
+        p->y += p->vy * dt;
+        if (p->type == PROJ_POKEBALL || p->type == PROJ_ROCK_SLIDE) {
+            p->vy -= 520.0f * dt;
+        }
+
+        // Terrain ground collision in 3D
+        if (game->camera3d.mode != VIEW_2D_ORTHO) {
+            float ph = Render3D_GetTerrainHeight(&game->tilemap, p->pos.x, p->pos.y);
+            if (p->y <= ph) {
+                if (p->type == PROJ_POKEBALL) {
+                    p->y = ph;
+                    p->vy = -p->vy * 0.40f;
+                    p->vel.x *= 0.65f;
+                    p->vel.y *= 0.65f;
+                    if (fabsf(p->vy) < 30.0f) p->vy = 0.0f;
+                } else if (p->type != PROJ_ORBITER && p->type != PROJ_LIGHTNING_BOLT) {
+                    p->y = ph;
+                    p->lifetime = p->max_lifetime; // Impact ground!
+                }
+            }
+        }
         
         if (p->is_enemy) {
             // Move enemy projectile
@@ -1324,6 +1416,10 @@ void Weapons_Update(GameState* game, float dt) {
             float dy = p->pos.y - player->pos.y;
             float hit_dist = p->radius + player->radius;
             if (dx * dx + dy * dy <= hit_dist * hit_dist) {
+                // In 3D, check vertical cylinder overlap so player can jump over bullets
+                if (game->camera3d.mode != VIEW_2D_ORTHO && fabsf((player->y + 16.0f) - p->y) > 28.0f) {
+                    continue;
+                }
                 if (player->invuln_timer <= 0.0f && !player->god_mode) {
                     player->hp -= p->damage;
                     player->damage_flash_timer = 0.20f;
@@ -1334,10 +1430,7 @@ void Weapons_Update(GameState* game, float dt) {
             }
         } else {
             // Player projectiles movement
-            if (p->type == PROJ_WATER_BOLT || p->type == PROJ_EMBER || p->type == PROJ_RAZOR_LEAF || p->type == PROJ_FIRE_BLAST) {
-                p->pos.x += p->vel.x * dt;
-                p->pos.y += p->vel.y * dt;
-            } else if (p->type == PROJ_SWIFT_STAR) {
+            if (p->type == PROJ_SWIFT_STAR) {
                 // Homing star: find nearest enemy and adjust velocity towards it!
                 float best_d2 = 450.0f * 450.0f;
                 Vec2 best_dir = p->vel;
@@ -1372,12 +1465,15 @@ void Weapons_Update(GameState* game, float dt) {
                 }
                 p->pos.x += p->vel.x * dt;
                 p->pos.y += p->vel.y * dt;
-            } else if (p->type == PROJ_BUBBLE) {
-                // SQUIRTLE BUBBLE BEAM: Slow floating buoyant drift with sinusoidal wobble
+            } else if (p->type == PROJ_BUBBLE || p->type == PROJ_SCALD_BUBBLE) {
+                // Floating buoyant drift with sinusoidal wobble
                 p->pos.x += p->vel.x * dt;
                 p->pos.y += p->vel.y * dt + sinf(p->lifetime * 7.5f) * 1.6f;
             } else if (p->type == PROJ_PULSE_RING) {
                 p->radius += 160.0f * dt;
+            } else if (p->type != PROJ_ORBITER && p->type != PROJ_LIGHTNING_BOLT) {
+                p->pos.x += p->vel.x * dt;
+                p->pos.y += p->vel.y * dt;
             }
         }
     }
@@ -1526,6 +1622,10 @@ void Weapons_Update(GameState* game, float dt) {
                 }
             } else if (gh->type == HAZARD_TOXIC_SPORE) {
                 if (gh->is_enemy) {
+                    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+                        float gh_height = Render3D_GetTerrainHeight(&game->tilemap, gh->pos.x, gh->pos.y);
+                        if (player->y > gh_height + 16.0f) continue; // Airborne jumping over ground hazard
+                    }
                     float pdx = player->pos.x - gh->pos.x;
                     float pdy = player->pos.y - gh->pos.y;
                     float pr = gh->radius + player->radius;

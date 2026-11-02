@@ -11,6 +11,7 @@
 
 // Forward declarations
 struct GameState;
+struct TileMap;
 
 typedef struct {
     float x;
@@ -84,6 +85,7 @@ void Camera3D_WorldToView(const Camera3D* cam, Vec3 world, Vec3* out_view);
 bool Camera3D_ViewToScreen(const Camera3D* cam, Vec3 view, float* out_screen_x, float* out_screen_y);
 bool Camera3D_Project(const Camera3D* cam, Vec3 world, float* out_screen_x, float* out_screen_y, float* out_depth);
 bool Camera3D_ScreenToGround(const Camera3D* cam, float screen_x, float screen_y, float ground_y, Vec3* out_world);
+bool Camera3D_RaycastCrosshair(const Camera3D* cam, const struct TileMap* map, const struct GameState* game, Vec3* out_hit_pos, int* out_enemy_idx);
 
 // Sprite Billboard Direction Mapping (Relative to 3D Camera Yaw)
 int Camera3D_GetRelativeDirection(const Camera3D* cam, int world_direction);

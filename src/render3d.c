@@ -177,19 +177,23 @@ float Render3D_GetTerrainHeight(const TileMap* map, float world_x, float world_z
     if (cell->flags & TILE_FLAG_RAMP) {
         float fx = (world_x - (float)tx * TILE_WORLD_SIZE) / TILE_WORLD_SIZE;
         float fz = (world_z - (float)ty * TILE_WORLD_SIZE) / TILE_WORLD_SIZE;
+        float base_h = (float)(cell->elevation > 1 ? cell->elevation - 1 : 0) * PLATEAU_HEIGHT;
         if (cell->tile_id == TILE_ROCK_RAMP_S) {
-            return (1.0f - fz) * PLATEAU_HEIGHT;
+            return base_h + (1.0f - fz) * PLATEAU_HEIGHT;
         } else if (cell->tile_id == TILE_ROCK_RAMP_N) {
-            return fz * PLATEAU_HEIGHT;
+            return base_h + fz * PLATEAU_HEIGHT;
         } else if (cell->tile_id == TILE_ROCK_RAMP_W) {
-            return fx * PLATEAU_HEIGHT;
+            return base_h + fx * PLATEAU_HEIGHT;
         } else if (cell->tile_id == TILE_ROCK_RAMP_E) {
-            return (1.0f - fx) * PLATEAU_HEIGHT;
+            return base_h + (1.0f - fx) * PLATEAU_HEIGHT;
         }
-        return PLATEAU_HEIGHT * 0.5f;
+        return base_h + PLATEAU_HEIGHT * 0.5f;
     }
     
-    if (cell->elevation == 1 || (cell->flags & TILE_FLAG_PLATEAU)) {
+    if (cell->elevation > 0) {
+        return (float)cell->elevation * PLATEAU_HEIGHT;
+    }
+    if (cell->flags & TILE_FLAG_PLATEAU) {
         return PLATEAU_HEIGHT;
     }
     if (cell->flags & TILE_FLAG_WATER) {
@@ -284,17 +288,19 @@ static void RenderTerrain3D(GameState* game) {
             float y00 = 0.0f, y10 = 0.0f, y11 = 0.0f, y01 = 0.0f;
             
             if (cell->flags & TILE_FLAG_RAMP) {
+                float base_h = (float)(cell->elevation > 1 ? cell->elevation - 1 : 0) * PLATEAU_HEIGHT;
                 if (cell->tile_id == TILE_ROCK_RAMP_S) {
-                    y00 = PLATEAU_HEIGHT; y10 = PLATEAU_HEIGHT; y11 = 0.0f; y01 = 0.0f;
+                    y00 = base_h + PLATEAU_HEIGHT; y10 = base_h + PLATEAU_HEIGHT; y11 = base_h; y01 = base_h;
                 } else if (cell->tile_id == TILE_ROCK_RAMP_N) {
-                    y00 = 0.0f; y10 = 0.0f; y11 = PLATEAU_HEIGHT; y01 = PLATEAU_HEIGHT;
+                    y00 = base_h; y10 = base_h; y11 = base_h + PLATEAU_HEIGHT; y01 = base_h + PLATEAU_HEIGHT;
                 } else if (cell->tile_id == TILE_ROCK_RAMP_W) {
-                    y00 = 0.0f; y10 = PLATEAU_HEIGHT; y11 = PLATEAU_HEIGHT; y01 = 0.0f;
+                    y00 = base_h; y10 = base_h + PLATEAU_HEIGHT; y11 = base_h + PLATEAU_HEIGHT; y01 = base_h;
                 } else if (cell->tile_id == TILE_ROCK_RAMP_E) {
-                    y00 = PLATEAU_HEIGHT; y10 = 0.0f; y11 = 0.0f; y01 = PLATEAU_HEIGHT;
+                    y00 = base_h + PLATEAU_HEIGHT; y10 = base_h; y11 = base_h; y01 = base_h + PLATEAU_HEIGHT;
                 }
-            } else if (cell->elevation == 1 || (cell->flags & TILE_FLAG_PLATEAU)) {
-                y00 = PLATEAU_HEIGHT; y10 = PLATEAU_HEIGHT; y11 = PLATEAU_HEIGHT; y01 = PLATEAU_HEIGHT;
+            } else if (cell->elevation > 0 || (cell->flags & TILE_FLAG_PLATEAU)) {
+                float h = (float)(cell->elevation > 0 ? cell->elevation : 1) * PLATEAU_HEIGHT;
+                y00 = h; y10 = h; y11 = h; y01 = h;
             } else if (cell->flags & TILE_FLAG_WATER) {
                 y00 = WATER_DEPTH; y10 = WATER_DEPTH; y11 = WATER_DEPTH; y01 = WATER_DEPTH;
             }
@@ -319,14 +325,33 @@ static void RenderTerrain3D(GameState* game) {
             float u1 = src_rect ? (float)(src_rect->x + src_rect->w) / TILESET_TEX_W : 1.0f;
             float v1 = src_rect ? (float)(src_rect->y + src_rect->h) / TILESET_TEX_H : 1.0f;
 
-            // Lighting & Palette Tint
+            // Lighting & Biome Palette Tint
             SDL_Color top_color = { 235, 235, 245, 255 };
-            if (map->current_biome == BIOME_VOLCANIC && (cell->flags & TILE_FLAG_WATER)) {
-                top_color = (SDL_Color){ 255, 120, 50, 255 }; // Glowing lava
+            if (map->current_biome == BIOME_VOLCANIC) {
+                if (cell->flags & TILE_FLAG_WATER) {
+                    float pulse = 0.5f + 0.5f * sinf(game->spawner.game_time * 4.0f + (float)(tx + ty));
+                    top_color = (SDL_Color){ 255, (Uint8)(95 + pulse * 45.0f), 25, 255 };
+                } else {
+                    top_color = (SDL_Color){ 175, 155, 150, 255 };
+                }
             } else if (map->current_biome == BIOME_CAVERN) {
-                top_color = (SDL_Color){ 165, 175, 195, 255 };
+                if (cell->flags & TILE_FLAG_WATER) {
+                    top_color = (SDL_Color){ 110, 195, 255, 255 };
+                } else {
+                    top_color = (SDL_Color){ 165, 175, 195, 255 };
+                }
             } else if (map->current_biome == BIOME_FOREST) {
-                top_color = (SDL_Color){ 215, 240, 215, 255 };
+                if (cell->flags & TILE_FLAG_WATER) {
+                    top_color = (SDL_Color){ 120, 225, 255, 255 };
+                } else {
+                    top_color = (SDL_Color){ 215, 242, 215, 255 };
+                }
+            } else if (map->current_biome == BIOME_COASTAL) {
+                if (cell->flags & TILE_FLAG_WATER) {
+                    top_color = (SDL_Color){ 70, 180, 250, 255 };
+                } else {
+                    top_color = (SDL_Color){ 245, 238, 220, 255 };
+                }
             }
 
             // Top quad: p0=NW, p1=NE, p2=SE, p3=SW
@@ -357,44 +382,77 @@ static void RenderTerrain3D(GameState* game) {
             }
 
             // 3D Cliff Faces on lower adjacent neighbors with Backface Culling
-            if (cell->elevation == 1 && !(cell->flags & TILE_FLAG_RAMP)) {
+            float h_curr = (cell->flags & TILE_FLAG_RAMP) ? 0.0f : ((cell->elevation > 0) ? (float)cell->elevation * PLATEAU_HEIGHT : 0.0f);
+            if (h_curr > 0.0f) {
                 const SDL_Rect* cliff_src = Tilemap_GetSrcRect(TILE_ROCK_B);
                 float cu0 = cliff_src ? (float)cliff_src->x / TILESET_TEX_W : 0.0f;
                 float cv0 = cliff_src ? (float)cliff_src->y / TILESET_TEX_H : 0.0f;
                 float cu1 = cliff_src ? (float)(cliff_src->x + cliff_src->w) / TILESET_TEX_W : 1.0f;
                 float cv1 = cliff_src ? (float)(cliff_src->y + cliff_src->h) / TILESET_TEX_H : 1.0f;
 
-                // South face: normal +Z (only visible if camera is South of face: cam->pos.z > z1)
-                if (cam->pos.z > z1 && ty + 1 < MAP_TILES_Y && map->cells[ty + 1][tx].elevation == 0 && !(map->cells[ty + 1][tx].flags & TILE_FLAG_RAMP)) {
-                    Vec3 c0 = { x0, 0.0f, z1 };
-                    Vec3 c1 = { x1, 0.0f, z1 };
-                    Vec3 c2 = { x1, PLATEAU_HEIGHT, z1 };
-                    Vec3 c3 = { x0, PLATEAU_HEIGHT, z1 };
-                    DrawTexturedQuad3D(renderer, cam, tex, c0, c1, c2, c3, cu0, cv0, cu1, cv1, (SDL_Color){ 180, 180, 195, 255 });
+                SDL_Color base_cliff = { 180, 180, 195, 255 };
+                if (map->current_biome == BIOME_VOLCANIC) {
+                    base_cliff = (SDL_Color){ 110, 95, 100, 255 };
+                } else if (map->current_biome == BIOME_CAVERN) {
+                    base_cliff = (SDL_Color){ 130, 140, 160, 255 };
+                } else if (map->current_biome == BIOME_FOREST) {
+                    base_cliff = (SDL_Color){ 165, 160, 145, 255 };
+                } else if (map->current_biome == BIOME_COASTAL) {
+                    base_cliff = (SDL_Color){ 195, 185, 165, 255 };
                 }
-                // North face: normal -Z (only visible if camera is North of face: cam->pos.z < z0)
-                if (cam->pos.z < z0 && ty - 1 >= 0 && map->cells[ty - 1][tx].elevation == 0 && !(map->cells[ty - 1][tx].flags & TILE_FLAG_RAMP)) {
-                    Vec3 c0 = { x1, 0.0f, z0 };
-                    Vec3 c1 = { x0, 0.0f, z0 };
-                    Vec3 c2 = { x0, PLATEAU_HEIGHT, z0 };
-                    Vec3 c3 = { x1, PLATEAU_HEIGHT, z0 };
-                    DrawTexturedQuad3D(renderer, cam, tex, c0, c1, c2, c3, cu0, cv0, cu1, cv1, (SDL_Color){ 140, 140, 160, 255 });
+
+                SDL_Color col_s = base_cliff;
+                SDL_Color col_n = { (Uint8)(base_cliff.r * 0.72f), (Uint8)(base_cliff.g * 0.72f), (Uint8)(base_cliff.b * 0.72f), 255 };
+                SDL_Color col_w = { (Uint8)(base_cliff.r * 1.08f > 255 ? 255 : base_cliff.r * 1.08f), (Uint8)(base_cliff.g * 1.08f > 255 ? 255 : base_cliff.g * 1.08f), (Uint8)(base_cliff.b * 1.08f > 255 ? 255 : base_cliff.b * 1.08f), 255 };
+                SDL_Color col_e = { (Uint8)(base_cliff.r * 0.88f), (Uint8)(base_cliff.g * 0.88f), (Uint8)(base_cliff.b * 0.88f), 255 };
+
+                // South face: normal +Z (visible if camera is South of face: cam->pos.z > z1)
+                if (cam->pos.z > z1 && ty + 1 < MAP_TILES_Y) {
+                    const MapCell* n_cell = &map->cells[ty + 1][tx];
+                    float h_s = (n_cell->flags & TILE_FLAG_RAMP) ? 0.0f : ((float)n_cell->elevation * PLATEAU_HEIGHT);
+                    if (h_curr > h_s + 2.0f) {
+                        Vec3 c0 = { x0, h_s, z1 };
+                        Vec3 c1 = { x1, h_s, z1 };
+                        Vec3 c2 = { x1, h_curr, z1 };
+                        Vec3 c3 = { x0, h_curr, z1 };
+                        DrawTexturedQuad3D(renderer, cam, tex, c0, c1, c2, c3, cu0, cv0, cu1, cv1, col_s);
+                    }
                 }
-                // West face: normal -X (only visible if camera is West of face: cam->pos.x < x0)
-                if (cam->pos.x < x0 && tx - 1 >= 0 && map->cells[ty][tx - 1].elevation == 0 && !(map->cells[ty][tx - 1].flags & TILE_FLAG_RAMP)) {
-                    Vec3 c0 = { x0, 0.0f, z0 };
-                    Vec3 c1 = { x0, 0.0f, z1 };
-                    Vec3 c2 = { x0, PLATEAU_HEIGHT, z1 };
-                    Vec3 c3 = { x0, PLATEAU_HEIGHT, z0 };
-                    DrawTexturedQuad3D(renderer, cam, tex, c0, c1, c2, c3, cu0, cv0, cu1, cv1, (SDL_Color){ 200, 200, 215, 255 });
+                // North face: normal -Z (visible if camera is North of face: cam->pos.z < z0)
+                if (cam->pos.z < z0 && ty - 1 >= 0) {
+                    const MapCell* n_cell = &map->cells[ty - 1][tx];
+                    float h_n = (n_cell->flags & TILE_FLAG_RAMP) ? 0.0f : ((float)n_cell->elevation * PLATEAU_HEIGHT);
+                    if (h_curr > h_n + 2.0f) {
+                        Vec3 c0 = { x1, h_n, z0 };
+                        Vec3 c1 = { x0, h_n, z0 };
+                        Vec3 c2 = { x0, h_curr, z0 };
+                        Vec3 c3 = { x1, h_curr, z0 };
+                        DrawTexturedQuad3D(renderer, cam, tex, c0, c1, c2, c3, cu0, cv0, cu1, cv1, col_n);
+                    }
                 }
-                // East face: normal +X (only visible if camera is East of face: cam->pos.x > x1)
-                if (cam->pos.x > x1 && tx + 1 < MAP_TILES_X && map->cells[ty][tx + 1].elevation == 0 && !(map->cells[ty][tx + 1].flags & TILE_FLAG_RAMP)) {
-                    Vec3 c0 = { x1, 0.0f, z1 };
-                    Vec3 c1 = { x1, 0.0f, z0 };
-                    Vec3 c2 = { x1, PLATEAU_HEIGHT, z0 };
-                    Vec3 c3 = { x1, PLATEAU_HEIGHT, z1 };
-                    DrawTexturedQuad3D(renderer, cam, tex, c0, c1, c2, c3, cu0, cv0, cu1, cv1, (SDL_Color){ 160, 160, 180, 255 });
+                // West face: normal -X (visible if camera is West of face: cam->pos.x < x0)
+                if (cam->pos.x < x0 && tx - 1 >= 0) {
+                    const MapCell* n_cell = &map->cells[ty][tx - 1];
+                    float h_w = (n_cell->flags & TILE_FLAG_RAMP) ? 0.0f : ((float)n_cell->elevation * PLATEAU_HEIGHT);
+                    if (h_curr > h_w + 2.0f) {
+                        Vec3 c0 = { x0, h_w, z0 };
+                        Vec3 c1 = { x0, h_w, z1 };
+                        Vec3 c2 = { x0, h_curr, z1 };
+                        Vec3 c3 = { x0, h_curr, z0 };
+                        DrawTexturedQuad3D(renderer, cam, tex, c0, c1, c2, c3, cu0, cv0, cu1, cv1, col_w);
+                    }
+                }
+                // East face: normal +X (visible if camera is East of face: cam->pos.x > x1)
+                if (cam->pos.x > x1 && tx + 1 < MAP_TILES_X) {
+                    const MapCell* n_cell = &map->cells[ty][tx + 1];
+                    float h_e = (n_cell->flags & TILE_FLAG_RAMP) ? 0.0f : ((float)n_cell->elevation * PLATEAU_HEIGHT);
+                    if (h_curr > h_e + 2.0f) {
+                        Vec3 c0 = { x1, h_e, z1 };
+                        Vec3 c1 = { x1, h_e, z0 };
+                        Vec3 c2 = { x1, h_curr, z0 };
+                        Vec3 c3 = { x1, h_curr, z1 };
+                        DrawTexturedQuad3D(renderer, cam, tex, c0, c1, c2, c3, cu0, cv0, cu1, cv1, col_e);
+                    }
                 }
             }
         }
@@ -477,6 +535,101 @@ static void DrawGroundShadow3D(SDL_Renderer* renderer, const Camera3D* cam, Vec3
     SDL_RenderGeometry(renderer, NULL, verts, segments + 1, indices, segments * 3);
 }
 
+static void Render3D_DrawCrosshairHUD(GameState* game) {
+    if (!game || !game->renderer) return;
+    if (game->camera3d.mode != VIEW_3D_THIRD_PERSON) return;
+    if (game->app_state != APP_STATE_PLAYING) return;
+
+    SDL_Renderer* renderer = game->renderer;
+    int cx = WINDOW_WIDTH / 2;
+    int cy = WINDOW_HEIGHT / 2;
+
+    bool has_target = (game->crosshair_target_enemy >= 0 && 
+                       game->crosshair_target_enemy < MAX_ENEMIES &&
+                       game->enemies[game->crosshair_target_enemy].active);
+    
+    SDL_Color reticle_col = has_target ? (SDL_Color){ 255, 65, 65, 255 } : (SDL_Color){ 240, 245, 255, 210 };
+    if (game->hitmarker_timer > 0.0f) {
+        reticle_col = (SDL_Color){ 255, 240, 90, 255 };
+    }
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, reticle_col.r, reticle_col.g, reticle_col.b, reticle_col.a);
+
+    // Center precision dot
+    SDL_Rect dot = { cx - 1, cy - 1, 3, 3 };
+    SDL_RenderFillRect(renderer, &dot);
+
+    // 4 Reticle Prongs (Risk of Rain 2 tactical crosshair)
+    int gap = has_target ? 7 : 9;
+    int len = 7;
+    int thick = 2;
+
+    // Left prong
+    SDL_Rect r_left = { cx - gap - len, cy - thick / 2, len, thick };
+    SDL_RenderFillRect(renderer, &r_left);
+
+    // Right prong
+    SDL_Rect r_right = { cx + gap, cy - thick / 2, len, thick };
+    SDL_RenderFillRect(renderer, &r_right);
+
+    // Top prong
+    SDL_Rect r_top = { cx - thick / 2, cy - gap - len, thick, len };
+    SDL_RenderFillRect(renderer, &r_top);
+
+    // Bottom prong
+    SDL_Rect r_bot = { cx - thick / 2, cy + gap, thick, len };
+    SDL_RenderFillRect(renderer, &r_bot);
+
+    // 4 Diagonal Hitmarker Ticks when hitmarker_timer > 0.0f
+    if (game->hitmarker_timer > 0.0f) {
+        float h_alpha = game->hitmarker_timer / 0.12f;
+        if (h_alpha > 1.0f) h_alpha = 1.0f;
+        Uint8 a = (Uint8)(h_alpha * 255.0f);
+        SDL_SetRenderDrawColor(renderer, 255, 80, 80, a);
+        
+        int h_gap = 4;
+        int h_len = 6;
+        // Top-Left tick
+        SDL_RenderDrawLine(renderer, cx - h_gap, cy - h_gap, cx - h_gap - h_len, cy - h_gap - h_len);
+        // Top-Right tick
+        SDL_RenderDrawLine(renderer, cx + h_gap, cy - h_gap, cx + h_gap + h_len, cy - h_gap - h_len);
+        // Bottom-Left tick
+        SDL_RenderDrawLine(renderer, cx - h_gap, cy + h_gap, cx - h_gap - h_len, cy + h_gap + h_len);
+        // Bottom-Right tick
+        SDL_RenderDrawLine(renderer, cx + h_gap, cy + h_gap, cx + h_gap + h_len, cy + h_gap + h_len);
+    }
+
+    // Target Locked Enemy Badge & HP bar below crosshair
+    if (has_target) {
+        Enemy* e = &game->enemies[game->crosshair_target_enemy];
+        EnemyTypeConfig* cfg = &game->enemy_types[e->type];
+        
+        float dist_3d = sqrtf((game->player.pos.x - e->pos.x)*(game->player.pos.x - e->pos.x) +
+                              (game->player.pos.y - e->pos.y)*(game->player.pos.y - e->pos.y));
+        
+        int bar_w = 70;
+        int bar_h = 5;
+        int bar_x = cx - bar_w / 2;
+        int bar_y = cy + 22;
+
+        SDL_SetRenderDrawColor(renderer, 20, 20, 25, 210);
+        SDL_Rect bar_bg = { bar_x, bar_y, bar_w, bar_h };
+        SDL_RenderFillRect(renderer, &bar_bg);
+
+        float hp_ratio = e->hp / (e->max_hp > 0.01f ? e->max_hp : 1.0f);
+        if (hp_ratio < 0.0f) hp_ratio = 0.0f;
+        if (hp_ratio > 1.0f) hp_ratio = 1.0f;
+        SDL_SetRenderDrawColor(renderer, 240, 50, 50, 240);
+        SDL_Rect bar_fg = { bar_x, bar_y, (int)(bar_w * hp_ratio), bar_h };
+        SDL_RenderFillRect(renderer, &bar_fg);
+
+        char info[48];
+        snprintf(info, sizeof(info), "%s (%.0fm)", cfg->name, dist_3d / 32.0f);
+        Font_DrawTextShadow(renderer, game->font_texture, info, cx - 38, cy + 30, 1, (SDL_Color){ 255, 220, 80, 240 });
+    }
+}
+
 void Render3D_DrawWorld(GameState* game) {
     if (!game || !game->renderer) return;
     SDL_Renderer* renderer = game->renderer;
@@ -499,7 +652,8 @@ void Render3D_DrawWorld(GameState* game) {
     s_depth_item_count = 0;
 
     float p_height = Render3D_GetTerrainHeight(&game->tilemap, game->player.pos.x, game->player.pos.y);
-    Vec3 p_pos_3d = { game->player.pos.x, p_height, game->player.pos.y };
+    float p_actual_y = (game->player.y > p_height) ? game->player.y : p_height;
+    Vec3 p_pos_3d = { game->player.pos.x, p_actual_y, game->player.pos.y };
 
     // Ground Shadows for entities
     for (int k = 0; k < game->active_enemy_count && s_depth_item_count < MAX_DEPTH_ITEMS; k++) {
@@ -519,16 +673,20 @@ void Render3D_DrawWorld(GameState* game) {
         }
     }
     
-    // Player Shadow
+    // Player Shadow (pinned to terrain surface, scaling down when airborne)
     if (s_depth_item_count < MAX_DEPTH_ITEMS) {
+        Vec3 shadow_pos = { game->player.pos.x, p_height, game->player.pos.y };
         Vec3 pv;
-        Camera3D_WorldToView(cam, p_pos_3d, &pv);
+        Camera3D_WorldToView(cam, shadow_pos, &pv);
         if (pv.z > cam->near_z) {
             DepthItem* it = &s_depth_items[s_depth_item_count++];
             it->depth = pv.z + 0.5f;
             it->type = ITEM_GROUND_SHADOW;
-            it->pos = p_pos_3d;
-            it->radius = game->player.radius * 0.95f;
+            it->pos = shadow_pos;
+            float air_height = p_actual_y - p_height;
+            float scale_jump = 1.0f - (air_height / 140.0f);
+            if (scale_jump < 0.30f) scale_jump = 0.30f;
+            it->radius = game->player.radius * 0.95f * scale_jump;
         }
     }
 
@@ -635,6 +793,7 @@ void Render3D_DrawWorld(GameState* game) {
             float gx = game->player.pos.x - game->player.dash_dir.x * ghost_dists[g];
             float gz = game->player.pos.y - game->player.dash_dir.y * ghost_dists[g];
             float gy = Render3D_GetTerrainHeight(&game->tilemap, gx, gz);
+            if (p_actual_y > gy) gy = p_actual_y;
             Vec3 gp = { gx, gy, gz };
             Vec3 gv;
             Camera3D_WorldToView(cam, gp, &gv);
@@ -705,14 +864,17 @@ void Render3D_DrawWorld(GameState* game) {
         if (!proj->active) continue;
         float ph = Render3D_GetTerrainHeight(&game->tilemap, proj->pos.x, proj->pos.y);
         
-        float proj_y = ph + 16.0f;
+        float proj_y = proj->y;
         if (proj->type == PROJ_MORTAR_SHELL) {
             float u = proj->lifetime / (proj->max_lifetime > 0.001f ? proj->max_lifetime : 1.0f);
             proj_y = ph + 16.0f + 140.0f * sinf(u * (float)M_PI);
         } else if (proj->type == PROJ_LIGHTNING_BOLT) {
             proj_y = ph + 80.0f;
-        } else if (proj->type == PROJ_BUBBLE || proj->type == PROJ_SCALD_BUBBLE) {
-            proj_y = ph + 14.0f + sinf(proj->lifetime * 8.0f) * 4.0f;
+        } else if (game->camera3d.mode == VIEW_2D_ORTHO) {
+            proj_y = ph + 16.0f;
+            if (proj->type == PROJ_BUBBLE || proj->type == PROJ_SCALD_BUBBLE) {
+                proj_y += sinf(proj->lifetime * 8.0f) * 4.0f;
+            }
         }
         
         Vec3 pp = { proj->pos.x, proj_y, proj->pos.y };
@@ -884,6 +1046,28 @@ void Render3D_DrawWorld(GameState* game) {
                             float pulse = 0.8f + 0.2f * sinf(game->spawner.game_time * 8.0f);
                             Font_DrawTextShadow(renderer, game->font_texture, "[E] CATCH", (int)sx - 26, (int)sy, 1, 
                                                 (SDL_Color){ 255, (Uint8)(220 * pulse), 60, 255 });
+                        }
+                    }
+
+                    // Floating mini HP bar for damaged active enemies in 3D
+                    if (e->hp < e->max_hp && e->hp > 0.0f) {
+                        float sx, sy;
+                        if (Camera3D_Project(cam, (Vec3){ it->pos.x, it->pos.y + spr_h + 3.0f, it->pos.z }, &sx, &sy, NULL)) {
+                            int bar_w = (int)(cfg->radius * 1.8f);
+                            if (bar_w < 24) bar_w = 24;
+                            if (bar_w > 48) bar_w = 48;
+                            int bar_h = 4;
+                            SDL_Rect hp_bg = { (int)sx - bar_w / 2, (int)sy, bar_w, bar_h };
+                            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+                            SDL_SetRenderDrawColor(renderer, 25, 25, 30, 200);
+                            SDL_RenderFillRect(renderer, &hp_bg);
+
+                            float ratio = e->hp / e->max_hp;
+                            if (ratio < 0.0f) ratio = 0.0f;
+                            if (ratio > 1.0f) ratio = 1.0f;
+                            SDL_SetRenderDrawColor(renderer, 235, 45, 45, 230);
+                            SDL_Rect hp_fg = { (int)sx - bar_w / 2, (int)sy, (int)(bar_w * ratio), bar_h };
+                            SDL_RenderFillRect(renderer, &hp_fg);
                         }
                     }
                 }
@@ -1068,7 +1252,7 @@ void Render3D_DrawWorld(GameState* game) {
     for (int v = 0; v < MAX_VINE_STRIKES; v++) {
         VineWhipStrike* whip = &game->vine_strikes[v];
         if (!whip->active) continue;
-        float sh = Render3D_GetTerrainHeight(&game->tilemap, whip->start_pos.x, whip->start_pos.y) + 16.0f;
+        float sh = p_actual_y + 16.0f;
         float th = Render3D_GetTerrainHeight(&game->tilemap, whip->tip_pos.x, whip->tip_pos.y) + 16.0f;
         
         int nodes = 10;
@@ -1091,7 +1275,7 @@ void Render3D_DrawWorld(GameState* game) {
     Player* pl = &game->player;
     if (pl->state == PLAYER_STATE_SOLAR_BEAM) {
         float px = pl->pos.x;
-        float py = p_height + 18.0f;
+        float py = p_actual_y + 18.0f;
         float pz = pl->pos.y;
         float ang = Sprite_DirectionToAngle(pl->anim.direction);
         float end_x = px + cosf(ang) * pl->special_q_range;
@@ -1102,7 +1286,7 @@ void Render3D_DrawWorld(GameState* game) {
     } else if (pl->state == PLAYER_STATE_FLAMETHROWER) {
         // Fire Blast 3D starburst
         float px = pl->pos.x;
-        float py = p_height + 16.0f;
+        float py = p_actual_y + 16.0f;
         float pz = pl->pos.y;
         float ang = Sprite_DirectionToAngle(pl->anim.direction);
         float progress = 1.0f - (pl->special_q_timer / pl->special_q_duration);
@@ -1164,8 +1348,8 @@ void Render3D_DrawWorld(GameState* game) {
         for (int a = 0; a < 24; a++) {
             float a1 = (float)a * (2.0f * (float)M_PI / 24.0f);
             float a2 = (float)(a + 1) * (2.0f * (float)M_PI / 24.0f);
-            Vec3 p1 = { pl->pos.x + cosf(a1) * pl->radius, p_height + 0.5f, pl->pos.y + sinf(a1) * pl->radius };
-            Vec3 p2 = { pl->pos.x + cosf(a2) * pl->radius, p_height + 0.5f, pl->pos.y + sinf(a2) * pl->radius };
+            Vec3 p1 = { pl->pos.x + cosf(a1) * pl->radius, p_actual_y + 0.5f, pl->pos.y + sinf(a1) * pl->radius };
+            Vec3 p2 = { pl->pos.x + cosf(a2) * pl->radius, p_actual_y + 0.5f, pl->pos.y + sinf(a2) * pl->radius };
             DrawClippedLine3D(renderer, cam, p1, p2, (SDL_Color){ 0, 255, 255, 220 }, 1);
         }
         // Enemy hitbox rings
@@ -1209,4 +1393,7 @@ void Render3D_DrawWorld(GameState* game) {
             DrawClippedLine3D(renderer, cam, g1, g2, (SDL_Color){ 80, 120, 180, 100 }, 1);
         }
     }
+
+    // 8. Risk of Rain 2 Tactical Crosshair HUD & Hitmarker
+    Render3D_DrawCrosshairHUD(game);
 }
