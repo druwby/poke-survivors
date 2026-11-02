@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "config.h"
 #include "tilemap.h"
+#include "camera3d.h"
 
 typedef struct {
     float x;
@@ -604,6 +605,7 @@ typedef struct {
     float player_grass_timer;
     
     Vec2 camera;
+    Camera3D camera3d;
     Vec2 mouse_pos;
     bool mouse_active;
     

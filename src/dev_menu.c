@@ -2,6 +2,7 @@
 #include "game.h"
 #include "weapons.h"
 #include "font.h"
+#include "sprite.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -625,30 +626,35 @@ void DevMenu_Draw(GameState* game) {
     // -------------------------------------------------------------
     else if (menu->current_tab == 4) {
         SDL_Color sec_col = { 100, 220, 255, 255 };
-        Font_DrawText(renderer, font, "SYSTEM & VISUAL DEBUGGING", content_x, content_y, 1, sec_col);
-        content_y += 20;
+        SDL_Color sub_col = { 80, 230, 255, 255 };
         
-        if (UI_Checkbox(renderer, font, "VSync (Display Refresh Lock)", content_x, content_y, &game->vsync_enabled)) {
+        // Left Column: System & Visual Debugs
+        int col1_x = content_x;
+        int col1_y = content_y;
+        Font_DrawText(renderer, font, "SYSTEM & VISUAL DEBUGGING", col1_x, col1_y, 1, sec_col);
+        col1_y += 20;
+        
+        if (UI_Checkbox(renderer, font, "VSync (Display Refresh Lock)", col1_x, col1_y, &game->vsync_enabled)) {
             SDL_RenderSetVSync(renderer, game->vsync_enabled ? 1 : 0);
         }
-        content_y += line_h;
+        col1_y += line_h;
         
-        UI_Checkbox(renderer, font, "Show Collision Hitboxes", content_x, content_y, &menu->show_hitboxes);
-        content_y += line_h;
+        UI_Checkbox(renderer, font, "Show Collision Hitboxes", col1_x, col1_y, &menu->show_hitboxes);
+        col1_y += line_h;
         
-        UI_Checkbox(renderer, font, "Show Spatial Hash Grid Cells", content_x, content_y, &menu->show_spatial_grid);
-        content_y += line_h;
+        UI_Checkbox(renderer, font, "Show Spatial Hash Grid Cells", col1_x, col1_y, &menu->show_spatial_grid);
+        col1_y += line_h;
         
-        UI_Checkbox(renderer, font, "Show Player Pickup Range Circle", content_x, content_y, &menu->show_pickup_range);
-        content_y += line_h;
+        UI_Checkbox(renderer, font, "Show Player Pickup Range Circle", col1_x, col1_y, &menu->show_pickup_range);
+        col1_y += line_h;
         
-        UI_Checkbox(renderer, font, "Show Floating Damage Numbers", content_x, content_y, &menu->show_damage_numbers);
-        content_y += line_h;
+        UI_Checkbox(renderer, font, "Show Floating Damage Numbers", col1_x, col1_y, &menu->show_damage_numbers);
+        col1_y += line_h;
         
-        UI_Checkbox(renderer, font, "Pause Simulation When Menu Open", content_x, content_y, &menu->pause_when_open);
-        content_y += line_h + 16;
+        UI_Checkbox(renderer, font, "Pause Simulation When Menu Open", col1_x, col1_y, &menu->pause_when_open);
+        col1_y += line_h + 16;
         
-        if (UI_Button(renderer, font, "RESET ALL DEFAULTS", content_x, content_y, 180, 26, (SDL_Color){ 90, 90, 100, 255 })) {
+        if (UI_Button(renderer, font, "RESET ALL DEFAULTS", col1_x, col1_y, 180, 26, (SDL_Color){ 90, 90, 100, 255 })) {
             // Restore defaults
             game->player.speed = 180.0f;
             game->player.max_hp = 100.0f;
@@ -676,6 +682,70 @@ void DevMenu_Draw(GameState* game) {
             game->spawner.difficulty_mult = 1.0f;
             game->spawner.separation_enabled = true;
             game->spawner.separation_strength = 75.0f;
+            
+            Camera3D_SetMode(&game->camera3d, VIEW_3D_THIRD_PERSON);
         }
+
+        // Right Column: 3D Camera Controls & Perspective
+        int col2_x = win_x + 355;
+        int col2_y = content_y;
+        Font_DrawText(renderer, font, "3D PERSPECTIVE & CAMERA", col2_x, col2_y, 1, sec_col);
+        col2_y += 20;
+
+        // View Mode Selector
+        Font_DrawText(renderer, font, "VIEW MODE PRESETS:", col2_x, col2_y, 1, sub_col);
+        col2_y += 18;
+        
+        int btn_w = 96;
+        if (UI_Button(renderer, font, "3D THIRD", col2_x, col2_y, btn_w, 24, 
+            game->camera3d.mode == VIEW_3D_THIRD_PERSON ? (SDL_Color){ 60, 140, 220, 255 } : (SDL_Color){ 35, 45, 60, 255 })) {
+            Camera3D_SetMode(&game->camera3d, VIEW_3D_THIRD_PERSON);
+        }
+        if (UI_Button(renderer, font, "3D TOP", col2_x + 102, col2_y, btn_w, 24, 
+            game->camera3d.mode == VIEW_3D_TOPDOWN ? (SDL_Color){ 60, 140, 220, 255 } : (SDL_Color){ 35, 45, 60, 255 })) {
+            Camera3D_SetMode(&game->camera3d, VIEW_3D_TOPDOWN);
+        }
+        if (UI_Button(renderer, font, "2D CLASSIC", col2_x + 204, col2_y, btn_w, 24, 
+            game->camera3d.mode == VIEW_2D_ORTHO ? (SDL_Color){ 60, 140, 220, 255 } : (SDL_Color){ 35, 45, 60, 255 })) {
+            Camera3D_SetMode(&game->camera3d, VIEW_2D_ORTHO);
+        }
+        col2_y += 32;
+
+        int c2_lbl_w = 120;
+        int c2_bar_w = 100;
+        
+        UI_SliderFloatEx(renderer, font, cur_id++, "Cam Distance", col2_x, col2_y, c2_lbl_w, c2_bar_w, &game->camera3d.target_distance, 180.0f, 950.0f, "%.0f");
+        col2_y += line_h;
+        
+        float pitch_deg = game->camera3d.pitch * (180.0f / (float)M_PI);
+        UI_SliderFloatEx(renderer, font, cur_id++, "Cam Pitch (deg)", col2_x, col2_y, c2_lbl_w, c2_bar_w, &pitch_deg, 8.0f, 75.0f, "%.1f deg");
+        game->camera3d.target_pitch = pitch_deg * ((float)M_PI / 180.0f);
+        col2_y += line_h;
+        
+        float fov_deg = game->camera3d.fov * (180.0f / (float)M_PI);
+        UI_SliderFloatEx(renderer, font, cur_id++, "Field of View", col2_x, col2_y, c2_lbl_w, c2_bar_w, &fov_deg, 45.0f, 90.0f, "%.0f deg");
+        game->camera3d.fov = fov_deg * ((float)M_PI / 180.0f);
+        game->camera3d.focal_length = ((float)WINDOW_HEIGHT * 0.5f) / tanf(game->camera3d.fov * 0.5f);
+        col2_y += line_h;
+
+        UI_Checkbox(renderer, font, "Smooth Camera Follow", col2_x, col2_y, &game->camera3d.smooth_follow_enabled);
+        col2_y += line_h;
+
+        UI_Checkbox(renderer, font, "Auto-Align Yaw When Moving", col2_x, col2_y, &game->camera3d.auto_align_yaw);
+        col2_y += line_h;
+
+        if (UI_Button(renderer, font, "ALIGN BEHIND PLAYER", col2_x, col2_y, 180, 22, (SDL_Color){ 50, 70, 95, 255 })) {
+            Camera3D_ResetBehindPlayer(&game->camera3d, Sprite_DirectionToAngle(game->player.anim.direction));
+        }
+        col2_y += 28;
+
+        SDL_Color hint_col = { 160, 185, 215, 255 };
+        Font_DrawText(renderer, font, "* [F3 / V] Cycle 3D/2D View Mode", col2_x, col2_y, 1, hint_col);
+        col2_y += 14;
+        Font_DrawText(renderer, font, "* [RMB / MMB] Mouse Orbit / Reset", col2_x, col2_y, 1, hint_col);
+        col2_y += 14;
+        Font_DrawText(renderer, font, "* [Scroll] Zoom In / Out", col2_x, col2_y, 1, hint_col);
+        col2_y += 14;
+        Font_DrawText(renderer, font, "* [Arrows / [ ]] Keyboard Orbit", col2_x, col2_y, 1, hint_col);
     }
 }

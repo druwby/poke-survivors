@@ -12,6 +12,8 @@
 #include "src/kanto_routes.h"
 #include "src/balance_sim.h"
 #include "src/telemetry.h"
+#include "src/camera3d.h"
+#include "src/render3d.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1445,6 +1447,152 @@ void test_volcanic_lava_and_tall_grass_interactions() {
     printf("  -> Volcanic lava hazard and tall grass interactions verified!\n");
 }
 
+void test_3d_camera_math_and_projection() {
+    printf("[TEST] Running test_3d_camera_math_and_projection...\n");
+    Camera3D cam;
+    Camera3D_Init(&cam, VIEW_3D_THIRD_PERSON);
+    assert(cam.mode == VIEW_3D_THIRD_PERSON);
+    
+    // Cycle modes
+    Camera3D_CycleMode(&cam);
+    assert(cam.mode == VIEW_3D_TOPDOWN);
+    Camera3D_CycleMode(&cam);
+    assert(cam.mode == VIEW_2D_ORTHO);
+    Camera3D_CycleMode(&cam);
+    assert(cam.mode == VIEW_3D_THIRD_PERSON);
+
+    // Test Basis Vectors & Orthonormality
+    Vec3 player_pos = { 500.0f, 0.0f, 500.0f };
+    Camera3D_Update(&cam, player_pos, 0.1f);
+    
+    float f_len = sqrtf(cam.forward.x * cam.forward.x + cam.forward.y * cam.forward.y + cam.forward.z * cam.forward.z);
+    float r_len = sqrtf(cam.right.x * cam.right.x + cam.right.y * cam.right.y + cam.right.z * cam.right.z);
+    float u_len = sqrtf(cam.up.x * cam.up.x + cam.up.y * cam.up.y + cam.up.z * cam.up.z);
+    assert(fabsf(f_len - 1.0f) < 1e-4f);
+    assert(fabsf(r_len - 1.0f) < 1e-4f);
+    assert(fabsf(u_len - 1.0f) < 1e-4f);
+
+    float f_dot_r = cam.forward.x * cam.right.x + cam.forward.y * cam.right.y + cam.forward.z * cam.right.z;
+    float f_dot_u = cam.forward.x * cam.up.x + cam.forward.y * cam.up.y + cam.forward.z * cam.up.z;
+    float r_dot_u = cam.right.x * cam.up.x + cam.right.y * cam.up.y + cam.right.z * cam.up.z;
+    assert(fabsf(f_dot_r) < 1e-4f);
+    assert(fabsf(f_dot_u) < 1e-4f);
+    assert(fabsf(r_dot_u) < 1e-4f);
+
+    // Test Target Projection onto screen center
+    float sx, sy, depth;
+    bool proj_ok = Camera3D_Project(&cam, cam.smooth_target, &sx, &sy, &depth);
+    assert(proj_ok);
+    assert(fabsf(sx - (float)WINDOW_WIDTH * 0.5f) < 1.0f);
+    assert(fabsf(sy - (float)WINDOW_HEIGHT * 0.5f) < 1.0f);
+    assert(fabsf(depth - cam.distance) < 2.0f);
+
+    // Test Screen to Ground raycasting
+    Vec3 ground_hit;
+    bool hit_ok = Camera3D_ScreenToGround(&cam, (float)WINDOW_WIDTH * 0.5f, (float)WINDOW_HEIGHT * 0.5f, cam.smooth_target.y, &ground_hit);
+    assert(hit_ok);
+    assert(fabsf(ground_hit.x - cam.smooth_target.x) < 2.0f);
+    assert(fabsf(ground_hit.z - cam.smooth_target.z) < 2.0f);
+
+    // Test Horizon Raycasting (Aiming into upper screen / sky)
+    Vec3 sky_hit;
+    bool sky_ok = Camera3D_ScreenToGround(&cam, (float)WINDOW_WIDTH * 0.5f, 20.0f, cam.smooth_target.y, &sky_hit);
+    assert(sky_ok);
+    // When looking North, aiming into the sky should project forward to the North (-Z)
+    assert(sky_hit.z < cam.smooth_target.z - 100.0f);
+
+    // Test Camera3D_Snap
+    Vec3 snap_target = { 1024.0f, 38.0f, 2048.0f };
+    Camera3D_Snap(&cam, snap_target);
+    assert(cam.target.x == snap_target.x);
+    assert(cam.target.z == snap_target.z);
+    assert(cam.smooth_target.x == snap_target.x);
+    assert(cam.smooth_target.z == snap_target.z);
+
+    // Test Camera3D_ResetBehindPlayer
+    Camera3D_ResetBehindPlayer(&cam, Sprite_DirectionToAngle(4)); // Facing North
+    assert(fabsf(cam.target_yaw - 0.0f) < 1e-4f); // Camera looks North
+    Camera3D_ResetBehindPlayer(&cam, Sprite_DirectionToAngle(2)); // Facing East
+    assert(fabsf(cam.target_yaw - (float)M_PI * 0.5f) < 1e-4f); // Camera looks East
+
+    // Test Camera-Relative WASD Movement
+    cam.yaw = 0.0f; // Looking North
+    float vx, vz;
+    Camera3D_GetMovementVector(&cam, 1.0f, 0.0f, &vx, &vz); // Forward (W)
+    assert(fabsf(vx) < 1e-4f && vz < -0.99f); // North is -Z
+    Camera3D_GetMovementVector(&cam, 0.0f, 1.0f, &vx, &vz); // Right (D)
+    assert(vx > 0.99f && fabsf(vz) < 1e-4f); // East is +X
+
+    cam.yaw = (float)M_PI * 0.5f; // Looking East
+    Camera3D_GetMovementVector(&cam, 1.0f, 0.0f, &vx, &vz); // Forward (W)
+    assert(vx > 0.99f && fabsf(vz) < 1e-4f); // Moving East
+    Camera3D_GetMovementVector(&cam, 0.0f, 1.0f, &vx, &vz); // Right (D)
+    assert(fabsf(vx) < 1e-4f && vz > 0.99f); // Moving South
+
+    printf("  -> 3D camera math, snap, horizon projection, and WASD transformation verified!\n");
+}
+
+void test_3d_billboard_facing_and_elevation() {
+    printf("[TEST] Running test_3d_billboard_facing_and_elevation...\n");
+    Camera3D cam;
+    Camera3D_Init(&cam, VIEW_3D_THIRD_PERSON);
+    
+    // When camera is looking North (yaw = 0):
+    cam.yaw = 0.0f;
+    // Facing North (row 4 in 2D) -> relative direction is 4 (Up, facing away)
+    assert(Camera3D_GetRelativeDirection(&cam, 4) == 4);
+    // Facing South (row 0 in 2D) -> relative direction is 0 (Down, facing toward camera)
+    assert(Camera3D_GetRelativeDirection(&cam, 0) == 0);
+    // Facing East (row 2 in 2D) -> relative direction is 2 (Right)
+    assert(Camera3D_GetRelativeDirection(&cam, 2) == 2);
+    // Facing West (row 6 in 2D) -> relative direction is 6 (Left)
+    assert(Camera3D_GetRelativeDirection(&cam, 6) == 6);
+
+    // When camera turns 180 degrees (yaw = PI, looking South):
+    cam.yaw = (float)M_PI;
+    // Facing North is now facing towards camera -> relative direction becomes 0 (Down)
+    assert(Camera3D_GetRelativeDirection(&cam, 4) == 0);
+    // Facing South is now facing away from camera -> relative direction becomes 4 (Up)
+    assert(Camera3D_GetRelativeDirection(&cam, 0) == 4);
+    // Facing East is now to the left of camera view -> relative direction becomes 6 (Left)
+    assert(Camera3D_GetRelativeDirection(&cam, 2) == 6);
+    // Facing West is now to the right of camera view -> relative direction becomes 2 (Right)
+    assert(Camera3D_GetRelativeDirection(&cam, 6) == 2);
+
+    // Test Terrain Elevation
+    TileMap map;
+    memset(&map, 0, sizeof(TileMap));
+    map.cells[10][10].elevation = 0;
+    map.cells[10][10].flags = TILE_FLAG_NONE;
+    assert(Render3D_GetTerrainHeight(&map, 10 * 64.0f + 32.0f, 10 * 64.0f + 32.0f) == 0.0f);
+
+    map.cells[10][11].elevation = 1;
+    map.cells[10][11].flags = TILE_FLAG_PLATEAU;
+    assert(Render3D_GetTerrainHeight(&map, 11 * 64.0f + 32.0f, 10 * 64.0f + 32.0f) == 38.0f);
+
+    map.cells[10][12].elevation = 0;
+    map.cells[10][12].flags = TILE_FLAG_WATER;
+    assert(Render3D_GetTerrainHeight(&map, 12 * 64.0f + 32.0f, 10 * 64.0f + 32.0f) == -6.0f);
+
+    // Ramp slope test
+    map.cells[10][13].flags = TILE_FLAG_RAMP;
+    map.cells[10][13].tile_id = TILE_ROCK_RAMP_S;
+    float ramp_bottom = Render3D_GetTerrainHeight(&map, 13 * 64.0f + 32.0f, 10 * 64.0f + 63.0f);
+    float ramp_mid    = Render3D_GetTerrainHeight(&map, 13 * 64.0f + 32.0f, 10 * 64.0f + 32.0f);
+    float ramp_top    = Render3D_GetTerrainHeight(&map, 13 * 64.0f + 32.0f, 10 * 64.0f + 1.0f);
+    assert(ramp_bottom < 2.0f);
+    assert(ramp_mid > 15.0f && ramp_mid < 25.0f);
+    assert(ramp_top > 36.0f);
+
+    // Destructible Boulder 3D elevation
+    Tilemap_AddBoulder(&map, 20, 20, 100.0f);
+    assert(map.boulder_count > 0);
+    float b_height = Render3D_GetTerrainHeight(&map, 20 * 64.0f + 32.0f, 20 * 64.0f + 32.0f);
+    assert(b_height == 0.0f);
+
+    printf("  -> 3D billboard relative direction mapping across 360 camera orbit, boulder elevation, and continuous ramp terrain verified!\n");
+}
+
 int main() {
     g_headless_sim = true;
     printf("=========================================\n");
@@ -1469,6 +1617,8 @@ int main() {
     test_destructible_boulder_physics();
     test_route_exit_gate_and_progression();
     test_volcanic_lava_and_tall_grass_interactions();
+    test_3d_camera_math_and_projection();
+    test_3d_billboard_facing_and_elevation();
     printf("\n>>> ALL TESTS PASSED SUCCESSFULLY! <<<\n");
     return 0;
 }

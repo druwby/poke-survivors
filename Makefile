@@ -15,7 +15,9 @@ SRCS = src/main.c \
        src/profiler.c \
        src/font.c \
        src/telemetry.c \
-       src/tilemap.c
+       src/tilemap.c \
+       src/camera3d.c \
+       src/render3d.c
 
 OBJS = $(SRCS:.c=.o)
 DEPS = $(SRCS:.c=.d)

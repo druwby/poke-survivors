@@ -9,6 +9,8 @@
 #include "font.h"
 #include "balance_sim.h"
 #include "telemetry.h"
+#include "camera3d.h"
+#include "render3d.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -881,6 +883,10 @@ void Game_SelectStarter(GameState* game, StarterID starter) {
     // Initialize Route 1 (Section 0, Route 0)
     KantoRoutes_Init(game);
 
+    // Snap 3D camera to player position
+    float sp_height = Render3D_GetTerrainHeight(&game->tilemap, p->pos.x, p->pos.y);
+    Camera3D_Snap(&game->camera3d, (Vec3){ p->pos.x, sp_height, p->pos.y });
+
     game->app_state = APP_STATE_PLAYING;
     game->paused = false;
     if (!g_headless_sim) printf("[Game] Selected starter: %d. Route 1 initialized!\n", starter);
@@ -945,17 +951,43 @@ void Game_Init(GameState* game, SDL_Window* window, SDL_Renderer* renderer) {
     game->mouse_active = false;
     game->mouse_pos = (Vec2){ 0.0f, 0.0f };
 
-    if (!g_headless_sim) printf("[Game] Initialized Kanto Roguelike Engine.\n");
+    // Initialize 3D Camera & Rendering Subsystem
+    Render3D_Init(game);
+
+    if (!g_headless_sim) printf("[Game] Initialized Kanto Roguelike Engine (3D Third-Person Architecture Active).\n");
 }
 
 void Game_HandleEvent(GameState* game, const SDL_Event* event) {
+    // 3D View Mode Toggle (F3 or V key)
+    if (event->type == SDL_KEYDOWN && (event->key.keysym.sym == SDLK_F3 || event->key.keysym.sym == SDLK_v)) {
+        Camera3D_CycleMode(&game->camera3d);
+        printf("[Camera] View mode switched to: %s\n", Camera3D_GetModeName(game->camera3d.mode));
+    }
+    
+    // Delegate to 3D Camera for Mouse Orbit and Wheel Zoom
+    Camera3D_HandleEvent(&game->camera3d, event);
+
     if (game->app_state == APP_STATE_PLAYING) {
+        float p_height = (game->camera3d.mode != VIEW_2D_ORTHO) ? Render3D_GetTerrainHeight(&game->tilemap, game->player.pos.x, game->player.pos.y) : 0.0f;
         if (event->type == SDL_MOUSEMOTION) {
             game->mouse_active = true;
-            game->mouse_pos = (Vec2){ (float)event->motion.x + game->camera.x,
-                                      (float)event->motion.y + game->camera.y };
-        } else if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_RIGHT) {
-            Game_ThrowPokeball(game);
+            if (game->camera3d.mode != VIEW_2D_ORTHO) {
+                Vec3 ground_pt;
+                if (Camera3D_ScreenToGround(&game->camera3d, (float)event->motion.x, (float)event->motion.y, p_height, &ground_pt)) {
+                    game->mouse_pos.x = ground_pt.x;
+                    game->mouse_pos.y = ground_pt.z;
+                }
+            } else {
+                game->mouse_pos = (Vec2){ (float)event->motion.x + game->camera.x,
+                                          (float)event->motion.y + game->camera.y };
+            }
+        } else if (event->type == SDL_MOUSEBUTTONDOWN) {
+            if (event->button.button == SDL_BUTTON_MIDDLE) {
+                // Middle click snaps camera directly behind player facing direction
+                Camera3D_ResetBehindPlayer(&game->camera3d, Sprite_DirectionToAngle(game->player.anim.direction));
+            } else if (game->camera3d.mode == VIEW_2D_ORTHO && event->button.button == SDL_BUTTON_RIGHT) {
+                Game_ThrowPokeball(game);
+            }
         } else if (event->type == SDL_KEYDOWN) {
             if (event->key.keysym.sym == SDLK_e || event->key.keysym.sym == SDLK_c) {
                 Game_ThrowPokeball(game);
@@ -1020,10 +1052,23 @@ void Game_HandleInput(GameState* game, const Uint8* keystate, float dt) {
     float vx = 0.0f;
     float vy = 0.0f;
     
-    if (keystate[SDL_SCANCODE_W] || keystate[SDL_SCANCODE_UP])    vy -= 1.0f;
-    if (keystate[SDL_SCANCODE_S] || keystate[SDL_SCANCODE_DOWN])  vy += 1.0f;
-    if (keystate[SDL_SCANCODE_A] || keystate[SDL_SCANCODE_LEFT])  vx -= 1.0f;
-    if (keystate[SDL_SCANCODE_D] || keystate[SDL_SCANCODE_RIGHT]) vx += 1.0f;
+    float fwd = 0.0f;
+    float rgt = 0.0f;
+    if (keystate[SDL_SCANCODE_W]) fwd += 1.0f;
+    if (keystate[SDL_SCANCODE_S]) fwd -= 1.0f;
+    if (keystate[SDL_SCANCODE_D]) rgt += 1.0f;
+    if (keystate[SDL_SCANCODE_A]) rgt -= 1.0f;
+
+    if (game->camera3d.mode == VIEW_2D_ORTHO) {
+        if (keystate[SDL_SCANCODE_UP])    fwd += 1.0f;
+        if (keystate[SDL_SCANCODE_DOWN])  fwd -= 1.0f;
+        if (keystate[SDL_SCANCODE_RIGHT]) rgt += 1.0f;
+        if (keystate[SDL_SCANCODE_LEFT])  rgt -= 1.0f;
+    } else {
+        Camera3D_HandleInput(&game->camera3d, keystate, dt);
+    }
+
+    Camera3D_GetMovementVector(&game->camera3d, fwd, rgt, &vx, &vy);
     
     float len = sqrtf(vx * vx + vy * vy);
     bool is_moving = (len > 0.01f);
@@ -2164,6 +2209,27 @@ void Game_Update(GameState* game, float dt) {
     if (game->camera.y < 0.0f) game->camera.y = 0.0f;
     if (game->camera.y > WORLD_SIZE_Y - WINDOW_HEIGHT) game->camera.y = WORLD_SIZE_Y - WINDOW_HEIGHT;
 
+    // 3D Camera Follow & Raycast Aim Position Update
+    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+        float p_height = Render3D_GetTerrainHeight(&game->tilemap, p->pos.x, p->pos.y);
+        Vec3 p_pos_3d = { p->pos.x, p_height, p->pos.y };
+        Camera3D_Update(&game->camera3d, p_pos_3d, dt);
+
+        if (game->camera3d.auto_align_yaw && p->anim.is_moving) {
+            Camera3D_ResetBehindPlayer(&game->camera3d, Sprite_DirectionToAngle(p->anim.direction));
+        }
+
+        if (game->mouse_active) {
+            int mx, my;
+            SDL_GetMouseState(&mx, &my);
+            Vec3 ground_pt;
+            if (Camera3D_ScreenToGround(&game->camera3d, (float)mx, (float)my, p_height, &ground_pt)) {
+                game->mouse_pos.x = ground_pt.x;
+                game->mouse_pos.y = ground_pt.z;
+            }
+        }
+    }
+
     // Profiler entity counters
     game->profiler.active_enemies = game->active_enemy_count;
     int a_projs = 0;
@@ -2177,6 +2243,7 @@ void Game_Update(GameState* game, float dt) {
 void Game_Draw(GameState* game) {
     SDL_Renderer* renderer = game->renderer;
     Vec2 camera = game->camera;
+    Player* p = &game->player;
     uint64_t t_r_start = Profiler_GetTimestamp();
 
     // -------------------------------------------------------------
@@ -2294,9 +2361,11 @@ void Game_Draw(GameState* game) {
     // -------------------------------------------------------------
     // PLAYING / LEVEL-UP / GAME-OVER WORLD RENDERING
     // -------------------------------------------------------------
-
-    // 1. Render World Tileset (Rich Route Tilemap)
-    Tilemap_Render(&game->tilemap, renderer, game->tileset_texture, camera.x, camera.y);
+    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+        Render3D_DrawWorld(game);
+    } else {
+        // 1. Render World Tileset (Rich Route Tilemap)
+        Tilemap_Render(&game->tilemap, renderer, game->tileset_texture, camera.x, camera.y);
     
     // 2. Spatial Grid Visualizer
     if (game->dev_menu.show_spatial_grid) {
@@ -2514,7 +2583,6 @@ void Game_Draw(GameState* game) {
     Party_Draw(game);
     
     // 5. Draw Player
-    Player* p = &game->player;
     bool player_flash = (p->damage_flash_timer > 0.0f);
     
     if (p->state == PLAYER_STATE_HYDRO_PUMP) {
@@ -2691,8 +2759,30 @@ void Game_Draw(GameState* game) {
                                          px + (int)(cosf(a2)*pr), py + (int)(sinf(a2)*pr));
         }
     }
+    } // End of 2D world rendering else block
     
     // 8. Player HUD & Route Banner
+    // Top-Right View Mode & Camera Controls Badge
+    int vm_w = 310;
+    int vm_h = 44;
+    int vm_x = WINDOW_WIDTH - vm_w - 16;
+    int vm_y = 16;
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 15, 22, 34, 220);
+    SDL_Rect vm_bg = { vm_x, vm_y, vm_w, vm_h };
+    SDL_RenderFillRect(renderer, &vm_bg);
+    SDL_SetRenderDrawColor(renderer, 60, 120, 200, 255);
+    SDL_RenderDrawRect(renderer, &vm_bg);
+    
+    char vm_title[48];
+    snprintf(vm_title, sizeof(vm_title), "[F3/V] %s", Camera3D_GetModeName(game->camera3d.mode));
+    Font_DrawTextShadow(renderer, game->font_texture, vm_title, vm_x + 10, vm_y + 8, 1, (SDL_Color){ 255, 220, 80, 255 });
+    if (game->camera3d.mode != VIEW_2D_ORTHO) {
+        Font_DrawText(renderer, game->font_texture, "RMB: Orbit | Scroll: Zoom | Cam: Arrows", vm_x + 10, vm_y + 24, 1, (SDL_Color){ 160, 200, 230, 255 });
+    } else {
+        Font_DrawText(renderer, game->font_texture, "Classic 2D Top-Down Mode Active", vm_x + 10, vm_y + 24, 1, (SDL_Color){ 160, 200, 230, 255 });
+    }
+
     // Top XP Bar
     int xp_h = 10;
     SDL_SetRenderDrawColor(renderer, 15, 20, 30, 230);
